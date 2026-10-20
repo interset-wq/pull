@@ -26,7 +26,7 @@ class GitSyncService {
       url: repo.cloneUrl,
       localPath: target.path,
       checkoutBranch: repo.defaultBranch,
-      callbacks: Callbacks(credentials: _credentials(token)),
+      callbacks: _credentials(token),
     );
     r.free();
     return target.path;
@@ -43,7 +43,7 @@ class GitSyncService {
     final r = Repository.open(repoDir.path);
     try {
       final remote = Remote.lookup(repo: r, name: 'origin');
-      remote.fetch(callbacks: Callbacks(credentials: _credentials(token)));
+      remote.fetch(callbacks: _credentials(token));
       remote.free();
 
       final branch = _currentBranch(r);
@@ -120,7 +120,7 @@ class GitSyncService {
       final remote = Remote.lookup(repo: r, name: 'origin');
       remote.push(
         refspecs: ['refs/heads/$branch'],
-        callbacks: Callbacks(credentials: _credentials(token)),
+        callbacks: _credentials(token),
       );
       remote.free();
       return true;
@@ -129,8 +129,9 @@ class GitSyncService {
     }
   }
 
-  Credentials _credentials(String token) =>
-      UserPass(username: token, password: token);
+  Callbacks _credentials(String token) => token.isEmpty
+      ? const Callbacks()
+      : Callbacks(credentials: UserPass(username: token, password: token));
 
   String _currentBranch(Repository r) {
     final head = r.head;

@@ -9,7 +9,8 @@ import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
 import 'markdown_viewer.dart';
 
-/// 首页：已克隆仓库列表 + 添加仓库（克隆）。
+/// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
+/// 移动端优先：大卡片、下拉刷新、底部导航结构。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -19,8 +20,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _sync = GitSyncService();
-  final _scanner = NoteScanner();
   List<Directory>? _repos;
+  bool _cloning = false;
 
   Future<Directory> get _reposRoot async {
     final docs = await getApplicationDocumentsDirectory();
@@ -37,6 +38,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadRepos() async {
     final root = await _reposRoot;
+    if (!mounted) return;
     setState(() {
       _repos = root
           .listSync(followLinks: false)
@@ -49,37 +51,54 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final repos = _repos;
     return Scaffold(
-      appBar: AppBar(title: const Text('Reader')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showCloneDialog,
-        icon: const Icon(Icons.add),
-        label: const Text('添加仓库'),
+      appBar: AppBar(
+        centerTitle: false,
+        title: Text('Reader', style: theme.textTheme.headlineMedium),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _cloning ? null : _showCloneDialog,
+        child: _cloning
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.add),
       ),
       body: repos == null
           ? const Center(child: CircularProgressIndicator())
-          : repos.isEmpty
-              ? const Center(child: Text('还没有仓库，点右下角添加'))
-              : ListView(
-                  children: [
-                    for (final repo in repos)
-                      ListTile(
-                        leading: const Icon(Icons.folder_special_outlined),
-                        title: Text(repo.path.split(Platform.pathSeparator).last),
-                        onTap: () => _openRepo(repo),
-                      ),
-                  ],
-                ),
+          : RefreshIndicator(
+              onRefresh: _loadRepos,
+              child: repos.isEmpty
+                  ? _EmptyState(onAdd: _showCloneDialog)
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                      itemCount: repos.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, i) {
+                        final repo = repos[i];
+                        final name =
+                            repo.path.split(Platform.pathSeparator).last;
+                        final count =
+                            NoteScanner().scan(repo.path).length;
+                        return _RepoCard(
+                          name: name,
+                          noteCount: count,
+                          onTap: () => _openRepo(repo),
+                        );
+                      },
+                    ),
+            ),
     );
   }
 
   void _openRepo(Directory repoDir) {
     Navigator.push(
       context,
-      MaterialPageRoute<void>(
-        builder: (_) => RepoPage(repoDir: repoDir, scanner: _scanner),
-      ),
+      MaterialPageRoute<void>(builder: (_) => RepoPage(repoDir: repoDir)),
     );
   }
 
@@ -89,21 +108,27 @@ class _HomePageState extends State<HomePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('克隆仓库'),
+        title: const Text('添加仓库'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: urlCtrl,
+              keyboardType: TextInputType.url,
               decoration: const InputDecoration(
-                labelText: '仓库地址（https 结尾 .git）',
+                labelText: '仓库地址',
+                hintText: 'https://…/notes.git',
+                border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 12),
             TextField(
               controller: tokenCtrl,
               obscureText: true,
               decoration: const InputDecoration(
-                labelText: '访问 Token（公开仓库可留空）',
+                labelText: '访问 Token',
+                hintText: '私有仓库必填，公开仓库可留空',
+                border: OutlineInputBorder(),
               ),
             ),
           ],
@@ -132,6 +157,7 @@ class _HomePageState extends State<HomePage> {
       cloneUrl: url,
       defaultBranch: 'main',
     );
+    setState(() => _cloning = true);
     try {
       await _sync.clone(
         repo: info,
@@ -139,11 +165,13 @@ class _HomePageState extends State<HomePage> {
         token: tokenCtrl.text.trim(),
       );
       await _loadRepos();
-    } on SyncException catch (e) {
+    } on Exception catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('克隆失败: $e')));
       }
+    } finally {
+      if (mounted) setState(() => _cloning = false);
     }
   }
 
@@ -154,30 +182,116 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 仓库内笔记列表页。
+/// 空状态引导。
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onAdd});
+
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListView(
+      children: [
+        const SizedBox(height: 120),
+        Icon(Icons.auto_stories_outlined,
+            size: 72, color: theme.colorScheme.primary.withAlpha(120)),
+        const SizedBox(height: 16),
+        Center(
+          child: Text('把你的笔记仓库装进口袋',
+              style: theme.textTheme.titleMedium),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: FilledButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: const Text('添加仓库'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 仓库卡片。
+class _RepoCard extends StatelessWidget {
+  const _RepoCard({required this.name, required this.noteCount, required this.onTap});
+
+  final String name;
+  final int noteCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(Icons.folder_special_outlined,
+                  color: theme.colorScheme.primary, size: 32),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: theme.textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Text('$noteCount 篇笔记',
+                        style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 仓库内笔记列表页：顶部搜索 + 按修改时间排序 + 下拉刷新。
 class RepoPage extends StatefulWidget {
-  const RepoPage({required this.repoDir, required this.scanner, super.key});
+  const RepoPage({required this.repoDir, super.key});
 
   final Directory repoDir;
-  final NoteScanner scanner;
 
   @override
   State<RepoPage> createState() => _RepoPageState();
 }
 
 class _RepoPageState extends State<RepoPage> {
+  final _scanner = NoteScanner();
   List<NoteFile>? _notes;
   String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _notes = widget.scanner.scan(widget.repoDir.path);
+    _notes = _scanner.scan(widget.repoDir.path);
+  }
+
+  void _refresh() {
+    setState(() => _notes = _scanner.scan(widget.repoDir.path));
   }
 
   @override
   Widget build(BuildContext context) {
-    final notes = _notes!;
+    final theme = Theme.of(context);
+    final notes = _notes ?? const <NoteFile>[];
     final filtered = _query.isEmpty
         ? notes
         : notes
@@ -187,51 +301,87 @@ class _RepoPageState extends State<RepoPage> {
             .toList();
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.repoDir.path.split(Platform.pathSeparator).last),
+        title: Text(
+          widget.repoDir.path.split(Platform.pathSeparator).last,
+          style: theme.textTheme.titleLarge,
+        ),
         actions: [
           IconButton(
             onPressed: _pull,
             icon: const Icon(Icons.sync),
-            tooltip: '同步（pull）',
+            tooltip: '同步',
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: TextField(
-              decoration: const InputDecoration(
-                hintText: '按文件名/路径搜索',
-                isDense: true,
-                prefixIcon: Icon(Icons.search),
-              ),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: SearchBar(
+              hintText: '搜索笔记',
+              leading: const Icon(Icons.search),
+              elevation: const WidgetStatePropertyAll(0),
+              constraints: const BoxConstraints(minHeight: 44),
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
           ),
-        ),
-      ),
-      body: filtered.isEmpty
-          ? const Center(child: Text('没有找到笔记'))
-          : ListView.builder(
-              itemCount: filtered.length,
-              itemBuilder: (context, i) {
-                final note = filtered[i];
-                return ListTile(
-                  title: Text(note.fileName),
-                  subtitle: Text(note.relativePath),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => MarkdownViewerPage(
-                        note: note,
-                        repoRoot: widget.repoDir.path,
-                      ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async => _refresh(),
+              child: filtered.isEmpty
+                  ? ListView(children: const [
+                      SizedBox(height: 120),
+                      Center(child: Text('没有找到笔记')),
+                    ])
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 32),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, i) {
+                        final note = filtered[i];
+                        return ListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 16),
+                          title: Text(
+                            note.fileName,
+                            style: theme.textTheme.titleMedium,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            note.relativePath,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Text(
+                            _fmtTime(note.modified),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => MarkdownViewerPage(
+                                note: note,
+                                repoRoot: widget.repoDir.path,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                );
-              },
             ),
+          ),
+        ],
+      ),
     );
+  }
+
+  String _fmtTime(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return '刚刚';
+    if (d.inHours < 1) return '${d.inMinutes} 分钟前';
+    if (d.inDays < 1) return '${d.inHours} 小时前';
+    if (d.inDays < 30) return '${d.inDays} 天前';
+    return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
   }
 
   Future<void> _pull() async {
@@ -240,12 +390,16 @@ class _RepoPageState extends State<RepoPage> {
         repoDir: widget.repoDir,
         token: '', // V1：公开仓库
       );
+      _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result == PullResult.upToDate ? '已是最新' : '已更新')),
+          SnackBar(
+            content: Text(result == PullResult.upToDate ? '已是最新' : '已更新'),
+            duration: const Duration(seconds: 1),
+          ),
         );
       }
-    } on SyncException catch (e) {
+    } on Exception catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('同步失败: $e')));

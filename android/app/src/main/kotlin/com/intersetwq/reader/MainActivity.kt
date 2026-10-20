@@ -1,4 +1,4 @@
-package com.reader.reader
+package com.intersetwq.reader
 
 import io.flutter.embedding.android.FlutterActivity
 

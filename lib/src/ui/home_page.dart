@@ -7,6 +7,7 @@ import '../git/sync_service.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
+import 'code_viewer.dart';
 import 'markdown_viewer.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
@@ -399,10 +400,17 @@ class _RepoPageState extends State<RepoPage> {
                               ),
                             ),
                           ),
-                        // 当前目录下的笔记
+                        // 当前目录下的笔记与代码文件
                         for (final note in notes)
                           ListTile(
-                            leading: const Icon(Icons.description_outlined),
+                            leading: Icon(
+                              note.isMarkdown
+                                  ? Icons.description_outlined
+                                  : Icons.code_outlined,
+                              color: note.isMarkdown
+                                  ? null
+                                  : Theme.of(context).colorScheme.secondary,
+                            ),
                             title: Text(
                               note.fileName,
                               maxLines: 1,
@@ -415,15 +423,7 @@ class _RepoPageState extends State<RepoPage> {
                                     overflow: TextOverflow.ellipsis,
                                   )
                                 : Text(_fmtTime(note.modified)),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => MarkdownViewerPage(
-                                  note: note,
-                                  repoRoot: widget.repoDir.path,
-                                ),
-                              ),
-                            ),
+                            onTap: () => _openFile(note),
                           ),
                       ],
                     ),
@@ -441,6 +441,30 @@ class _RepoPageState extends State<RepoPage> {
             n.fileName.toLowerCase().contains(_query) ||
             n.relativePath.toLowerCase().contains(_query))
         .toList();
+  }
+
+  void _openFile(NoteFile note) {
+    if (note.isMarkdown) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => MarkdownViewerPage(
+            note: note,
+            repoRoot: widget.repoDir.path,
+          ),
+        ),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => CodeViewerPage(
+            path: note.absolutePath,
+            fileName: note.fileName + note.extension,
+          ),
+        ),
+      );
+    }
   }
 
   String _fmtTime(DateTime t) {

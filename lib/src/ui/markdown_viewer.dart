@@ -3,11 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 
-import '../git/sync_service.dart';
 import '../notes/gfm_alerts.dart';
+import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
+import '../notes/toc.dart';
 import 'copy_button.dart';
-import 'note_editor.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
 /// 移动端优先：舒适边距、字号调节、底部工具栏。
@@ -31,6 +31,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   String? _title;
   List<String> _tags = const [];
+  List<TocEntry> _toc = const [];
   late Future<String> _content;
 
   @override
@@ -40,89 +41,19 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   Future<String> _load() async {
-    final raw = await File(widget.note.absolutePath).readAsString();
-    final fm = FrontMatter.parse(raw);
-    _title = fm.title;
-    _tags = fm.tags;
-    return fm.body;
-  }
-
-  Future<void> _edit() async {
-    final saved = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute<bool>(
-        builder: (_) => NoteEditorPage(note: widget.note),
-      ),
-    );
-    if (saved == true) {
-      setState(() => _content = _load());
+    var raw = await File(widget.note.absolutePath).readAsString();
+    if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
+      raw = IpynbConverter.toMarkdown(raw);
     }
-  }
-
-  Future<void> _commitAndPush() async {
-    final msgCtrl = TextEditingController(text: 'update ${widget.note.fileName}');
-    final tokenCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('提交并推送'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: msgCtrl,
-              decoration: const InputDecoration(
-                labelText: '提交说明',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tokenCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '访问 Token',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('提交推送'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      final pushed = await GitSyncService().commitAndPush(
-        repoDir: Directory(widget.repoRoot),
-        paths: [widget.note.relativePath],
-        message: msgCtrl.text.trim(),
-        userName: 'reader',
-        userEmail: 'reader@local',
-        token: tokenCtrl.text.trim(),
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(pushed ? '已提交并推送' : '没有需要提交的改动'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } on Exception catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('提交失败: $e')));
-      }
+    if (!widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
+      final fm = FrontMatter.parse(raw);
+      _title = fm.title;
+      _tags = fm.tags;
+      _toc = extractToc(fm.body);
+      return fm.body;
     }
+    _toc = extractToc(raw);
+    return raw;
   }
 
   @override
@@ -152,16 +83,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         child: Row(
           children: [
             IconButton(
-              tooltip: '编辑',
-              onPressed: _edit,
-              icon: const Icon(Icons.edit_outlined),
+              tooltip: '目录',
+              onPressed: _showTocSheet,
+              icon: const Icon(Icons.list_outlined),
             ),
             const Spacer(),
-            IconButton(
-              tooltip: '提交推送',
-              onPressed: _commitAndPush,
-              icon: const Icon(Icons.cloud_upload_outlined),
-            ),
             IconButton(
               tooltip: '字号',
               onPressed: _showFontSheet,
@@ -227,9 +153,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
     );
   }
 
@@ -303,6 +232,44 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             child: CopyButton(code: code),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showTocSheet() {
+    if (_toc.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('本文没有标题'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView.builder(
+          itemCount: _toc.length,
+          itemBuilder: (context, i) {
+            final entry = _toc[i];
+            return ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.only(left: 16.0 * entry.level),
+              title: Text(
+                entry.text,
+                style: TextStyle(
+                  fontSize: 15 - (entry.level - 2) * 0.5,
+                  fontWeight:
+                      entry.level <= 2 ? FontWeight.w600 : FontWeight.w400,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => Navigator.pop(context),
+            );
+          },
+        ),
       ),
     );
   }

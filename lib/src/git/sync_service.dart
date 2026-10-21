@@ -76,59 +76,6 @@ class GitSyncService {
     }
   }
 
-  /// 提交指定文件的改动并 push 到远端同分支。
-  ///
-  /// 只提交 [paths] 列出的文件；无改动时返回 false。
-  Future<bool> commitAndPush({
-    required Directory repoDir,
-    required List<String> paths,
-    required String message,
-    required String userName,
-    required String userEmail,
-    required String token,
-  }) async {
-    final r = Repository.open(repoDir.path);
-    try {
-      final index = r.index;
-      index.addAll(paths);
-      final treeOid = index.writeTree();
-      index.write();
-      if (_hasNoUncommittedChanges(r)) {
-        return false;
-      }
-
-      final tree = Tree.lookup(repo: r, oid: treeOid);
-      final signature = Signature.create(
-        name: userName,
-        email: userEmail,
-        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        offset: DateTime.now().timeZoneOffset.inMinutes,
-      );
-      final parent = Commit.lookup(repo: r, oid: r.head.target);
-      final branch = _currentBranch(r);
-
-      Commit.create(
-        repo: r,
-        updateRef: 'refs/heads/$branch',
-        author: signature,
-        committer: signature,
-        message: message,
-        tree: tree,
-        parents: [parent],
-      );
-
-      final remote = Remote.lookup(repo: r, name: 'origin');
-      remote.push(
-        refspecs: ['refs/heads/$branch'],
-        callbacks: _credentials(token),
-      );
-      remote.free();
-      return true;
-    } finally {
-      r.free();
-    }
-  }
-
   Callbacks _credentials(String token) => token.isEmpty
       ? const Callbacks()
       : Callbacks(credentials: UserPass(username: token, password: token));
@@ -138,11 +85,6 @@ class GitSyncService {
     final name = head.name;
     head.free();
     return name.replaceFirst('refs/heads/', '');
-  }
-
-  bool _hasNoUncommittedChanges(Repository r) {
-    final status = r.status;
-    return status.isEmpty;
   }
 
   void _checkoutHead(Repository r) {

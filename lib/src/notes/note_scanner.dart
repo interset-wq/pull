@@ -1,11 +1,20 @@
 import 'dart:io';
 
-/// 扫描本地仓库中的 Markdown 笔记。
+/// 扫描本地仓库中的笔记（Markdown/Notebook）与代码文件。
 class NoteScanner {
-  static const _mdExtensions = {'.md', '.markdown'};
+  static const mdExtensions = {'.md', '.markdown', '.ipynb'};
+
+  /// 支持语法高亮查看的代码/文本扩展名。
+  static const codeExtensions = {
+    '.dart', '.py', '.js', '.mjs', '.ts', '.tsx', '.jsx', '.java', '.kt',
+    '.kts', '.go', '.rs', '.c', '.h', '.cpp', '.cc', '.hpp', '.cs', '.rb',
+    '.php', '.swift', '.m', '.sh', '.bash', '.zsh', '.json', '.yaml', '.yml',
+    '.toml', '.xml', '.html', '.css', '.scss', '.sql', '.r', '.lua', '.pl',
+    '.txt', '.gradle', '.properties', '.cfg', '.ini', '.cmake',
+  };
   static const skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
 
-  /// 递归列出仓库下所有 Markdown 文件（相对仓库根的路径），
+  /// 递归列出仓库下所有可查看文件（相对仓库根的路径），
   /// 按最后修改时间倒序。
   List<NoteFile> scan(String repoRoot) {
     final root = Directory(repoRoot);
@@ -26,7 +35,9 @@ class NoteScanner {
         final ext = name.contains('.')
             ? name.substring(name.lastIndexOf('.')).toLowerCase()
             : '';
-        if (!_mdExtensions.contains(ext)) continue;
+        if (!mdExtensions.contains(ext) && !codeExtensions.contains(ext)) {
+          continue;
+        }
         final stat = entity.statSync();
         out.add(
           NoteFile(
@@ -63,6 +74,14 @@ class NoteFile {
     final dot = base.lastIndexOf('.');
     return dot > 0 ? base.substring(0, dot) : base;
   }
+
+  String get extension {
+    final base = relativePath.split('/').last;
+    final dot = base.lastIndexOf('.');
+    return dot > 0 ? base.substring(dot).toLowerCase() : '';
+  }
+
+  bool get isMarkdown => NoteScanner.mdExtensions.contains(extension);
 }
 
 /// 从 Markdown 文本头部解析 front-matter（--- 包裹的 key: value）。

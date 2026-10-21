@@ -1,19 +1,20 @@
 # AGENTS.md
 
-基于 git 仓库的笔记阅读 App：把 GitHub / Gitee / GitCode 上的 Markdown 笔记仓库克隆到手机，提供原生阅读器体验（代码高亮、图片相对路径、front-matter 元数据、目录/标签/最近更新三种查找方式），支持轻量编辑后 commit + push 回仓库。零部署、零构建托管。
+本地 git 仓库阅读器：把 GitHub / Gitee / GitCode（即 AtomGit）上的笔记仓库克隆到手机，提供原生阅读器体验——Markdown/Notebook 渲染、代码高亮、文章 TOC、目录树浏览；只读，不做编辑提交。零部署、零构建托管。
 
 ## 技术栈与选型（已定，勿擅自更换）
 
-- **框架**：Flutter（iOS + Android 双端），Dart 3 / Flutter 3.47+
-- **git 层**：libgit2 FFI（git2dart）优先，备选平台 API 拉取 + 本地缓存；这是本项目最大技术风险点，改动同步层前先做小验证
-- **Markdown 渲染**：markdown_widget / flutter_markdown + 代码高亮
+- **框架**：Flutter（iOS + Android 双端），Dart 3 / Flutter 3.47+；另含 windows 桌面平台用于本机预览
+- **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证
+- **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
+- **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
-- **鉴权**：各平台 PAT token 登录，token 只存本地安全存储，禁止硬编码或写入日志
+- **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 
 ## 第一版范围（反目标即边界）
 
-- 只做：整仓克隆 → 舒服地读（第一优先级是渲染体验）→ 轻量编辑提交
-- 不做：完整编辑器、双链/图谱、协作功能、任何形式的部署/CI/静态站生成
+- 只做：整仓克隆 → 舒服地读（第一优先级是渲染体验）→ 按原目录结构浏览（目录树禁止扁平化）+ 全局搜索
+- 已明确不做：**任何编辑/commit/push 功能**（用户 2026-10 移除）、双链/图谱、协作、私有仓库、部署/CI/静态站生成
 - 底线：渲染效果不能差于博客；同步冲突/丢内容不可接受——涉及 git 操作的改动必须重点自查这两条
 
 ## 开发约定

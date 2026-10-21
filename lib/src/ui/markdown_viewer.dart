@@ -12,6 +12,7 @@ import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
 import '../notes/toc.dart';
 import 'copy_button.dart';
+import 'h_scrollbar.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
 /// 移动端优先：舒适边距、字号调节、底部工具栏。
@@ -151,11 +152,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         TableConfig(
-          wrapper: (child) =>
-              SingleChildScrollView( // 表格超宽时水平滚动，避免截断
-                scrollDirection: Axis.horizontal,
-                child: child,
-              ),
+          wrapper: (child) => HScrollbar(child: child),
         ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),
@@ -164,7 +161,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   /// 正文渲染：按 GFM 告警块分割，告警渲染为彩色提示框；
-  /// 标题挂 AutoScrollTag 供目录锚点跳转。
+  /// 标题挂 AutoScrollTag 供目录锚点跳转（目录列表由 _load 的 extractToc 提供，
+  /// 两者均按文档顺序生成，索引一一对应）。
   Widget _renderBody(
     String content,
     ThemeData theme,
@@ -172,7 +170,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     final generator = MarkdownGenerator();
     final children = <Widget>[];
-    final collected = <TocEntry>[];
     var anchorIndex = 0;
     for (final segment in splitGfmAlerts(content)) {
       switch (segment) {
@@ -201,11 +198,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_listEquals(collected, _toc)) {
-        setState(() => _toc = collected);
-      }
-    });
     return SingleChildScrollView(
       controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
@@ -214,14 +206,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         children: children,
       ),
     );
-  }
-
-  static bool _listEquals(List<TocEntry> a, List<TocEntry> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i].level != b[i].level || a[i].text != b[i].text) return false;
-    }
-    return true;
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。
@@ -276,8 +260,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     return PreConfig(
       padding: EdgeInsets.zero,
       decoration: const BoxDecoration(),
-      builder: (code, language) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      builder: (code, language) => HScrollbar(
         child: Stack(
           children: [
             HighlightView(

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 
+import '../git/sync_service.dart';
 import '../notes/note_scanner.dart';
+import 'note_editor.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
 /// 移动端优先：舒适边距、字号调节、底部工具栏。
@@ -32,13 +34,93 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   @override
   void initState() {
     super.initState();
-    _content = () async {
-      final raw = await File(widget.note.absolutePath).readAsString();
-      final fm = FrontMatter.parse(raw);
-      _title = fm.title;
-      _tags = fm.tags;
-      return fm.body;
-    }();
+    _content = _load();
+  }
+
+  Future<String> _load() async {
+    final raw = await File(widget.note.absolutePath).readAsString();
+    final fm = FrontMatter.parse(raw);
+    _title = fm.title;
+    _tags = fm.tags;
+    return fm.body;
+  }
+
+  Future<void> _edit() async {
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => NoteEditorPage(note: widget.note),
+      ),
+    );
+    if (saved == true) {
+      setState(() => _content = _load());
+    }
+  }
+
+  Future<void> _commitAndPush() async {
+    final msgCtrl = TextEditingController(text: 'update ${widget.note.fileName}');
+    final tokenCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('提交并推送'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: msgCtrl,
+              decoration: const InputDecoration(
+                labelText: '提交说明',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: tokenCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: '访问 Token',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('提交推送'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final pushed = await GitSyncService().commitAndPush(
+        repoDir: Directory(widget.repoRoot),
+        paths: [widget.note.relativePath],
+        message: msgCtrl.text.trim(),
+        userName: 'reader',
+        userEmail: 'reader@local',
+        token: tokenCtrl.text.trim(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(pushed ? '已提交并推送' : '没有需要提交的改动'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('提交失败: $e')));
+      }
+    }
   }
 
   @override
@@ -67,7 +149,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         height: 48,
         child: Row(
           children: [
+            IconButton(
+              tooltip: '编辑',
+              onPressed: _edit,
+              icon: const Icon(Icons.edit_outlined),
+            ),
             const Spacer(),
+            IconButton(
+              tooltip: '提交推送',
+              onPressed: _commitAndPush,
+              icon: const Icon(Icons.cloud_upload_outlined),
+            ),
             IconButton(
               tooltip: '字号',
               onPressed: _showFontSheet,

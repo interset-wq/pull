@@ -44,15 +44,8 @@ class _HomePageState extends State<HomePage> {
       _repos = root
           .listSync(followLinks: false)
           .whereType<Directory>()
-          .where(
-            (d) =>
-                File(
-                  '${d.path}${Platform.pathSeparator}.reader-repo.json',
-                ).existsSync() ||
-                Directory(
-                  '${d.path}${Platform.pathSeparator}.git',
-                ).existsSync(),
-          )
+          .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
+              .existsSync())
           .toList();
     });
   }

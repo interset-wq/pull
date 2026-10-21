@@ -22,7 +22,7 @@ import 'image_gallery.dart';
 import 'repo_image.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
-/// 移动端优先：舒适边距、字号调节、底部工具栏。
+/// 移动端优先：舒适边距、字号调节、顶栏菜单。
 class MarkdownViewerPage extends StatefulWidget {
   const MarkdownViewerPage({
     required this.note,
@@ -104,10 +104,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
-  /// 沉浸式顶栏：下滑隐藏、上滑/点屏幕唤出。
-  bool _appBarHidden = false;
-  double _lastScrollOffset = 0;
-
   /// 当前所在章节（TOC 高亮），-1 表示尚未定位。
   final _currentSection = ValueNotifier<int>(-1);
   final List<GlobalKey> _headingKeys = [];
@@ -136,14 +132,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final offset = _scrollController.offset;
-    final delta = offset - _lastScrollOffset;
-    _lastScrollOffset = offset;
-    if (delta < -24 && !_appBarHidden) {
-      setState(() => _appBarHidden = true);
-    } else if (delta > 24 && _appBarHidden) {
-      setState(() => _appBarHidden = false);
-    }
     // 章节定位节流：避免每次滚动帧都遍历标题
     final now = DateTime.now();
     if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
@@ -198,11 +186,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: _ImmersiveAppBar(
-        hidden: _appBarHidden,
-        title: _title ?? widget.note.fileName,
-        tags: _tags,
+      appBar: AppBar(
+        title: Text(
+          _title ?? widget.note.fileName,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
+          if (_tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                _tags.join(' · '),
+                style: theme.textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: '更多',
@@ -227,29 +226,23 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ],
       ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () {
-          if (_appBarHidden) setState(() => _appBarHidden = false);
-        },
-        child: _showRaw
-            ? _buildRawView(theme)
-            : FutureBuilder<String>(
-              future: _content,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final fontSize = _fontSizes[_fontIndex];
-                final isDark = theme.brightness == Brightness.dark;
-                final config = _markdownConfig(theme, isDark, fontSize);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _renderBody(snapshot.data!, theme, config),
-                );
-              },
-            ),
-      ),
+      body: _showRaw
+          ? _buildRawView(theme)
+          : FutureBuilder<String>(
+            future: _content,
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final fontSize = _fontSizes[_fontIndex];
+              final isDark = theme.brightness == Brightness.dark;
+              final config = _markdownConfig(theme, isDark, fontSize);
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _renderBody(snapshot.data!, theme, config),
+              );
+            },
+          ),
     );
   }
 
@@ -851,105 +844,4 @@ class _HeadingMarker extends StatefulWidget {
 class _HeadingMarkerState extends State<_HeadingMarker> {
   @override
   Widget build(BuildContext context) => widget.child;
-}
-
-/// 沉浸式顶栏：高度随 hidden 状态动画收展（下滑隐藏 / 上滑或点屏唤出）。
-class _ImmersiveAppBar extends StatefulWidget implements PreferredSizeWidget {
-  const _ImmersiveAppBar({
-    required this.hidden,
-    required this.title,
-    required this.tags,
-    required this.actions,
-  });
-
-  final bool hidden;
-  final String title;
-  final List<String> tags;
-  final List<Widget> actions;
-
-  @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
-
-  @override
-  State<_ImmersiveAppBar> createState() => _ImmersiveAppBarState();
-}
-
-class _ImmersiveAppBarState extends State<_ImmersiveAppBar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-    value: widget.hidden ? 0 : 1,
-  );
-
-  @override
-  void didUpdateWidget(_ImmersiveAppBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.hidden != widget.hidden) {
-      widget.hidden ? _controller.reverse() : _controller.forward();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // 与标准 AppBar 一致：自身高度包含状态栏 inset，
-    // Scaffold 把 app bar 槽位放在屏幕顶端，不含 inset 时内容藏在状态栏后
-    final topPadding = MediaQuery.of(context).padding.top;
-    final canPop = Navigator.of(context).canPop();
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final t = Curves.easeInOut.transform(_controller.value);
-        return FadeTransition(
-          opacity: AlwaysStoppedAnimation(t),
-          child: Material(
-            color: theme.colorScheme.surface,
-            child: ClipRect(
-              child: Container(
-                height: (topPadding + kToolbarHeight) * t,
-                padding: EdgeInsets.only(top: topPadding * t),
-                child: Row(
-                  children: [
-                    if (canPop)
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          widget.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleLarge,
-                        ),
-                      ),
-                    ),
-                    if (widget.tags.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          widget.tags.join(' · '),
-                          style: theme.textTheme.bodySmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ...widget.actions,
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
 }

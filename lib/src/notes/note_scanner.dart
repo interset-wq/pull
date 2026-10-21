@@ -3,7 +3,7 @@ import 'dart:io';
 /// 扫描本地仓库中的 Markdown 笔记。
 class NoteScanner {
   static const _mdExtensions = {'.md', '.markdown'};
-  static const _skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
+  static const skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
 
   /// 递归列出仓库下所有 Markdown 文件（相对仓库根的路径），
   /// 按最后修改时间倒序。
@@ -20,7 +20,7 @@ class NoteScanner {
     for (final entity in dir.listSync(followLinks: false)) {
       final name = entity.path.split(Platform.pathSeparator).last;
       if (entity is Directory) {
-        if (_skipDirs.contains(name) || name.startsWith('.')) continue;
+        if (skipDirs.contains(name) || name.startsWith('.')) continue;
         _walk(entity, root, out);
       } else if (entity is File) {
         final ext = name.contains('.')

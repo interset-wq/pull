@@ -263,11 +263,14 @@ class _RepoCard extends StatelessWidget {
   }
 }
 
-/// 仓库内笔记列表页：顶部搜索 + 按修改时间排序 + 下拉刷新。
+/// 仓库内浏览页：保留仓库原目录结构逐层展开；搜索时全局扁平匹配。
 class RepoPage extends StatefulWidget {
-  const RepoPage({required this.repoDir, super.key});
+  const RepoPage({required this.repoDir, this.subPath = '', super.key});
 
   final Directory repoDir;
+
+  /// 相对仓库根的当前目录（'' = 根目录）。
+  final String subPath;
 
   @override
   State<RepoPage> createState() => _RepoPageState();
@@ -275,36 +278,68 @@ class RepoPage extends StatefulWidget {
 
 class _RepoPageState extends State<RepoPage> {
   final _scanner = NoteScanner();
-  List<NoteFile>? _notes;
+  List<NoteFile>? _allNotes;
   String _query = '';
+
+  Directory get _currentDir => Directory(
+      '${widget.repoDir.path}${Platform.pathSeparator}'
+      '${widget.subPath.replaceAll('/', Platform.pathSeparator)}'
+          .replaceAll(RegExp(r'[/\\]+$'), ''));
 
   @override
   void initState() {
     super.initState();
-    _notes = _scanner.scan(widget.repoDir.path);
+    _allNotes = _scanner.scan(widget.repoDir.path);
   }
 
   void _refresh() {
-    setState(() => _notes = _scanner.scan(widget.repoDir.path));
+    setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
+  }
+
+  /// 当前目录下的子文件夹（跳过隐藏与临时目录），排序后返回名称。
+  List<String> _subDirs() {
+    if (!mounted) return const [];
+    final dir = _currentDir;
+    if (!dir.existsSync()) return const [];
+    return dir
+        .listSync(followLinks: false)
+        .whereType<Directory>()
+        .map((d) => d.path.split(Platform.pathSeparator).last)
+        .where((name) =>
+            !name.startsWith('.') && !NoteScanner.skipDirs.contains(name))
+        .toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// 当前目录下的 Markdown 笔记。
+  List<NoteFile> _localNotes() {
+    final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
+    return (_allNotes ?? const <NoteFile>[])
+        .where((n) => n.relativePath.startsWith(prefix))
+        .where((n) => !n.relativePath
+            .substring(prefix.length)
+            .contains('/'))
+        .toList()
+      ..sort((a, b) =>
+          a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final notes = _notes ?? const <NoteFile>[];
-    final filtered = _query.isEmpty
-        ? notes
-        : notes
-            .where((n) =>
-                n.fileName.toLowerCase().contains(_query) ||
-                n.relativePath.toLowerCase().contains(_query))
-            .toList();
+    final searching = _query.isNotEmpty;
+    final repoName = widget.repoDir.path.split(Platform.pathSeparator).last;
+    final title = widget.subPath.isEmpty
+        ? repoName
+        : widget.subPath.split('/').last;
+
+    final notes = searching ? _searchAll() : _localNotes();
+    final dirs = searching ? const <String>[] : _subDirs();
+    final isEmpty = dirs.isEmpty && notes.isEmpty;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.repoDir.path.split(Platform.pathSeparator).last,
-          style: theme.textTheme.titleLarge,
-        ),
+        title: Text(title, style: theme.textTheme.titleLarge),
         actions: [
           IconButton(
             onPressed: _pull,
@@ -318,61 +353,94 @@ class _RepoPageState extends State<RepoPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: SearchBar(
-              hintText: '搜索笔记',
+              hintText: searching ? '搜索中…' : '搜索笔记',
               leading: const Icon(Icons.search),
               elevation: const WidgetStatePropertyAll(0),
               constraints: const BoxConstraints(minHeight: 44),
+              trailing: searching
+                  ? [
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() => _query = ''),
+                      ),
+                    ]
+                  : null,
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
           ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async => _refresh(),
-              child: filtered.isEmpty
+              child: isEmpty
                   ? ListView(children: const [
                       SizedBox(height: 120),
-                      Center(child: Text('没有找到笔记')),
+                      Center(child: Text('这里没有笔记')),
                     ])
-                  : ListView.builder(
+                  : ListView(
                       padding: const EdgeInsets.only(bottom: 32),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, i) {
-                        final note = filtered[i];
-                        return ListTile(
-                          contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 16),
-                          title: Text(
-                            note.fileName,
-                            style: theme.textTheme.titleMedium,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            note.relativePath,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: Text(
-                            _fmtTime(note.modified),
-                            style: theme.textTheme.bodySmall,
-                          ),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => MarkdownViewerPage(
-                                note: note,
-                                repoRoot: widget.repoDir.path,
+                      children: [
+                        // 子文件夹（保持原目录结构）
+                        for (final name in dirs)
+                          ListTile(
+                            leading: Icon(
+                              Icons.folder_outlined,
+                              color: theme.colorScheme.primary,
+                            ),
+                            title: Text(name),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => RepoPage(
+                                  repoDir: widget.repoDir,
+                                  subPath: widget.subPath.isEmpty
+                                      ? name
+                                      : '${widget.subPath}/$name',
+                                ),
                               ),
                             ),
                           ),
-                        );
-                      },
+                        // 当前目录下的笔记
+                        for (final note in notes)
+                          ListTile(
+                            leading: const Icon(Icons.description_outlined),
+                            title: Text(
+                              note.fileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: searching
+                                ? Text(
+                                    note.relativePath,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  )
+                                : Text(_fmtTime(note.modified)),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => MarkdownViewerPage(
+                                  note: note,
+                                  repoRoot: widget.repoDir.path,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 全仓库扁平搜索（仅搜索模式使用）。
+  List<NoteFile> _searchAll() {
+    return (_allNotes ?? const <NoteFile>[])
+        .where((n) =>
+            n.fileName.toLowerCase().contains(_query) ||
+            n.relativePath.toLowerCase().contains(_query))
+        .toList();
   }
 
   String _fmtTime(DateTime t) {

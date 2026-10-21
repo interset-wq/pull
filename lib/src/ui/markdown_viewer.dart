@@ -13,6 +13,7 @@ import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
 import '../notes/toc.dart';
+import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
@@ -118,6 +119,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     super.initState();
     _content = _load();
     _scrollController.addListener(_onScroll);
+    AppPrefs.loadFontIndex().then((i) {
+      if (mounted && i >= 0 && i < _fontSizes.length) {
+        setState(() => _fontIndex = i);
+      }
+    });
   }
 
   @override
@@ -679,6 +685,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               groupValue: _fontIndex,
               onChanged: (v) {
                 setState(() => _fontIndex = v!);
+                AppPrefs.saveFontIndex(v!);
                 Navigator.pop(context);
               },
               child: Column(

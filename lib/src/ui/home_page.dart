@@ -9,6 +9,7 @@ import '../git/sync_service.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
+import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
 import 'markdown_viewer.dart';
 
@@ -60,6 +61,57 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         centerTitle: false,
         title: Text('Reader', style: theme.textTheme.headlineMedium),
+        actions: [
+          if (AppPrefs.instance case final prefs?)
+            ListenableBuilder(
+              listenable: prefs,
+              builder: (context, _) {
+                return PopupMenuButton<ThemeMode>(
+                  tooltip: '主题',
+                  icon: Icon(
+                    switch (prefs.mode) {
+                      ThemeMode.system => Icons.brightness_auto,
+                      ThemeMode.light => Icons.light_mode,
+                      ThemeMode.dark => Icons.dark_mode,
+                    },
+                  ),
+                  onSelected: (m) => prefs.setMode(m),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: ThemeMode.system,
+                      child: Row(
+                        children: [
+                          Icon(Icons.brightness_auto, size: 20),
+                          SizedBox(width: 12),
+                          Text('跟随系统'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: ThemeMode.light,
+                      child: Row(
+                        children: [
+                          Icon(Icons.light_mode, size: 20),
+                          SizedBox(width: 12),
+                          Text('浅色'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: ThemeMode.dark,
+                      child: Row(
+                        children: [
+                          Icon(Icons.dark_mode, size: 20),
+                          SizedBox(width: 12),
+                          Text('深色'),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _cloning ? null : _showCloneDialog,

@@ -16,14 +16,21 @@ class AppPrefs extends ChangeNotifier {
   static AppPrefs? get instance => _instance;
 
   /// 启动时读取持久化设置（幂等，重复调用返回同一实例）。
+  /// 偏好只是"锦上添花"：读取失败或超时一律回退默认值，绝不阻塞启动。
   static Future<AppPrefs> load() async {
     if (_instance != null) return _instance!;
-    final sp = await SharedPreferences.getInstance();
-    final mode = switch (sp.getString(_modeKey)) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
-    };
+    ThemeMode mode = ThemeMode.system;
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      mode = switch (sp.getString(_modeKey)) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+    } on Object {
+      // 保持默认（跟随系统）
+    }
     return _instance = AppPrefs._(mode);
   }
 
@@ -31,18 +38,32 @@ class AppPrefs extends ChangeNotifier {
     if (m == _mode) return;
     _mode = m;
     notifyListeners();
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString(_modeKey, m.name);
+    try {
+      final sp = await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setString(_modeKey, m.name);
+    } on Object {
+      // 保存失败不影响本次会话的主题切换
+    }
   }
 
   /// 阅读字号索引持久化（越界值由调用方校验）。
   static Future<int> loadFontIndex() async {
-    final sp = await SharedPreferences.getInstance();
-    return sp.getInt(_fontKey) ?? 1;
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      return sp.getInt(_fontKey) ?? 1;
+    } on Object {
+      return 1;
+    }
   }
 
   static Future<void> saveFontIndex(int index) async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.setInt(_fontKey, index);
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setInt(_fontKey, index);
+    } on Object {
+      // 忽略
+    }
   }
 }

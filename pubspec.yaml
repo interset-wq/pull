@@ -44,6 +44,8 @@ dependencies:
   archive: ^4.5.2
   git2dart_binaries: 1.14.0
   url_launcher: ^6.3.3
+  shared_preferences: 2.3.2
+  shared_preferences_android: 2.3.2
 
 dev_dependencies:
   flutter_test:

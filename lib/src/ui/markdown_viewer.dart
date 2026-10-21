@@ -14,6 +14,8 @@ import '../notes/toc.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
+import 'image_gallery.dart';
+import 'repo_image.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
 /// 移动端优先：舒适边距、字号调节、底部工具栏。
@@ -38,6 +40,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   String? _title;
   List<String> _tags = const [];
   List<TocEntry> _toc = const [];
+  List<String> _imageUrls = const [];
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
@@ -55,19 +58,47 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   Future<String> _load() async {
     var raw = await File(widget.note.absolutePath).readAsString();
+    var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
-      raw = IpynbConverter.toMarkdown(raw);
-    }
-    if (!widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
+      body = IpynbConverter.toMarkdown(raw);
+    } else {
       final fm = FrontMatter.parse(raw);
       _title = fm.title;
       _tags = fm.tags;
-      _toc = extractToc(fm.body);
-      return fm.body;
+      body = fm.body;
     }
-    _toc = extractToc(raw);
-    return raw;
+    body = _normalizeHtmlImages(body);
+    _toc = extractToc(body);
+    _imageUrls = _collectImageUrls(body);
+    return body;
   }
+
+  /// 匹配 <img src="...">（属性顺序任意、单双引号均可）。
+  static final RegExp _htmlImgRegExp = RegExp(
+    r'''<img[^>]*\ssrc=["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+
+  /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
+  /// 同时归一化 <br> 与块级 div/p 包裹。
+  static String _normalizeHtmlImages(String md) {
+    return md
+        .replaceAllMapped(
+          _htmlImgRegExp,
+          (m) => '\n\n![](${m.group(1)!})\n\n',
+        )
+        .replaceAll(RegExp(r'</?div[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
+        .replaceAll(RegExp(r'</?p[^>]*>', caseSensitive: false), '\n\n');
+  }
+
+  /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。
+  static List<String> _collectImageUrls(String body) => RegExp(
+        r'!\[[^\]]*\]\(([^)\s]+)\)',
+      )
+          .allMatches(body)
+          .map((m) => m.group(1)!)
+          .toList();
 
   @override
   Widget build(BuildContext context) {
@@ -491,59 +522,35 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// 仓库内相对路径的图片解析为本地文件；网络图片原样加载。
-  /// 点击可全屏缩放查看。
+  /// 正文图片：统一加载（本地/网络），点击进入图片阅读器。
   Widget _buildImage(String url) {
-    final clean = url.trim();
-    final Widget image;
-    if (clean.startsWith('http://') || clean.startsWith('https://')) {
-      image = Image.network(clean);
-    } else {
-      final file = File(
-        '${widget.repoRoot}${Platform.pathSeparator}'
-        '${clean.replaceAll('/', Platform.pathSeparator)}',
-      );
-      if (!file.existsSync()) return _broken(url);
-      image = Image.file(file);
-    }
+    final src = url.trim();
+    final index = _imageUrls.indexOf(src);
     return GestureDetector(
-      onTap: () => _showImageFullscreen(image, url),
+      onTap: () => _openGallery(index < 0 ? 0 : index),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: image,
+          child: buildRepoImage(src, repoRoot: widget.repoRoot),
         ),
       ),
     );
   }
 
-  void _showImageFullscreen(Widget image, String url) {
+  void _openGallery(int index) {
+    if (_imageUrls.isEmpty) return;
     Navigator.push(
       context,
-      PageRouteBuilder<void>(
-        opaque: false,
-        barrierColor: Colors.black87,
-        pageBuilder: (_, _, _) => Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            title: Text(
-              url.split('/').last,
-              style: const TextStyle(fontSize: 14),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          body: InteractiveViewer(
-            maxScale: 5,
-            child: Center(child: image),
-          ),
+      MaterialPageRoute<void>(
+        builder: (_) => ImageGalleryPage(
+          sources: _imageUrls,
+          repoRoot: widget.repoRoot,
+          initialIndex: index,
         ),
       ),
     );
   }
-
-  Widget _broken(String url) => Text('[图片缺失: $url]');
 }
 
 /// 引用块卡片化：浅背景 + 圆角 + 主题色左条（混合风格）。

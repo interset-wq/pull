@@ -268,12 +268,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               code,
               language: language,
               theme: isDark ? atomOneDarkTheme : githubTheme,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.only(top: 28, left: 12, right: 12, bottom: 12),
               textStyle: kCodeFontStyle.copyWith(
                 fontSize: 13,
                 height: 1.5,
               ),
             ),
+            if (language.isNotEmpty)
+              Positioned(
+                top: 4,
+                left: 12,
+                child: Text(
+                  language,
+                  style: kCodeFontStyle.copyWith(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             Positioned(
               top: 4,
               right: 4,

@@ -131,6 +131,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         const ListConfig(),
+        CodeConfig(
+          style: TextStyle(
+            backgroundColor: isDark
+                ? theme.colorScheme.surfaceContainerHighest.withAlpha(204)
+                : const Color(0xCCeff1f3),
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),
       ],

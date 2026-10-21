@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 
 import '../git/sync_service.dart';
+import '../notes/gfm_alerts.dart';
 import '../notes/note_scanner.dart';
+import 'copy_button.dart';
 import 'note_editor.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
@@ -175,26 +177,132 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             return const Center(child: CircularProgressIndicator());
           }
           final fontSize = _fontSizes[_fontIndex];
-          return MarkdownWidget(
-            data: snapshot.data!,
-            config: MarkdownConfig(
-              configs: [
-                H1Config(style: theme.textTheme.headlineMedium!.copyWith(height: 1.4)),
-                H2Config(style: theme.textTheme.headlineSmall!.copyWith(height: 1.4)),
-                H3Config(style: theme.textTheme.titleLarge!.copyWith(height: 1.4)),
-                PConfig(
-                  textStyle: theme.textTheme.bodyLarge!.copyWith(
-                    fontSize: fontSize,
-                    height: 1.75,
-                  ),
-                ),
-                const ListConfig(),
-                const PreConfig(),
-                ImgConfig(builder: (url, alt) => _buildImage(url)),
-              ],
-            ),
+          final isDark = theme.brightness == Brightness.dark;
+          final config = _markdownConfig(theme, isDark, fontSize);
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _renderBody(snapshot.data!, theme, config),
           );
         },
+      ),
+    );
+  }
+
+  MarkdownConfig _markdownConfig(
+    ThemeData theme,
+    bool isDark,
+    double fontSize,
+  ) {
+    return MarkdownConfig(
+      configs: [
+        H1Config(style: theme.textTheme.headlineMedium!.copyWith(height: 1.4)),
+        H2Config(style: theme.textTheme.headlineSmall!.copyWith(height: 1.4)),
+        H3Config(style: theme.textTheme.titleLarge!.copyWith(height: 1.4)),
+        PConfig(
+          textStyle: theme.textTheme.bodyLarge!.copyWith(
+            fontSize: fontSize,
+            height: 1.75,
+          ),
+        ),
+        const ListConfig(),
+        _preConfig(theme, isDark),
+        ImgConfig(builder: (url, alt) => _buildImage(url)),
+      ],
+    );
+  }
+
+  /// 正文渲染：按 GFM 告警块分割，告警渲染为彩色提示框。
+  Widget _renderBody(
+    String content,
+    ThemeData theme,
+    MarkdownConfig config,
+  ) {
+    final generator = MarkdownGenerator();
+    final children = <Widget>[];
+    for (final segment in splitGfmAlerts(content)) {
+      switch (segment) {
+        case TextSegment(:final text):
+          children.addAll(generator.buildWidgets(text, config: config));
+        case AlertSegment(:final type, :final body):
+          children.add(_alertBox(type, body, theme, config, generator));
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  /// GFM 告警框：左侧色条 + 图标标题 + 正文。
+  Widget _alertBox(
+    GfmAlertType type,
+    String body,
+    ThemeData theme,
+    MarkdownConfig config,
+    MarkdownGenerator generator,
+  ) {
+    final color = Color(type.color);
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(20),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: color, width: 4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(_alertIcon(type), size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                type.title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          ...generator.buildWidgets(body, config: config),
+        ],
+      ),
+    );
+  }
+
+  IconData _alertIcon(GfmAlertType type) => switch (type) {
+        GfmAlertType.note => Icons.info_outline,
+        GfmAlertType.tip => Icons.lightbulb_outline,
+        GfmAlertType.important => Icons.priority_high_outlined,
+        GfmAlertType.warning => Icons.warning_amber_outlined,
+        GfmAlertType.caution => Icons.dangerous_outlined,
+      };
+
+  /// 代码块配置：配色跟随全局明暗主题，右上角一键复制。
+  PreConfig _preConfig(ThemeData theme, bool isDark) {
+    final codeBg = isDark
+        ? theme.colorScheme.surfaceContainerHighest
+        : const Color(0xffeff1f3);
+    return PreConfig(
+      decoration: BoxDecoration(
+        color: codeBg,
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+      ),
+      textStyle: TextStyle(
+        fontSize: 14,
+        color: theme.colorScheme.onSurface,
+      ),
+      wrapper: (child, code, language) => Stack(
+        children: [
+          child,
+          Positioned(
+            top: 4,
+            right: 4,
+            child: CopyButton(code: code),
+          ),
+        ],
       ),
     );
   }

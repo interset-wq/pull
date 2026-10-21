@@ -6,11 +6,13 @@ import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
 import '../notes/toc.dart';
+import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
@@ -283,6 +285,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 ? theme.colorScheme.tertiary.withAlpha(120)
                 : const Color(0xff0969da).withAlpha(80),
           ),
+          onTap: _onLinkTap,
         ),
         BlockquoteConfig(
           sideColor: isDark
@@ -480,6 +483,69 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       },
     );
   }
+
+  /// 链接点击：外部链接浏览器打开；#锚点页内跳转；
+  /// 相对路径链接解析为仓库内文件（笔记进阅读页，其余进代码查看器）。
+  Future<void> _onLinkTap(String href) async {
+    final url = href.trim();
+    if (url.isEmpty) return;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return;
+    }
+    final hash = url.indexOf('#');
+    final pathPart = hash < 0 ? url : url.substring(0, hash);
+    final anchor = hash < 0 ? null : url.substring(hash + 1);
+    if (pathPart.isEmpty) {
+      final idx = _headingIndexForAnchor(anchor!);
+      if (idx >= 0) {
+        _scrollController.scrollToIndex(
+          idx,
+          duration: const Duration(milliseconds: 300),
+        );
+      }
+      return;
+    }
+    final decoded = Uri.decodeComponent(pathPart);
+    final file =
+        File('$_noteDir${Platform.pathSeparator}$decoded').absolute.path;
+    if (!file.startsWith(widget.repoRoot) || !File(file).existsSync()) {
+      return;
+    }
+    final stat = File(file).statSync();
+    final note = NoteFile(
+      relativePath: file.substring(widget.repoRoot.length + 1),
+      absolutePath: file,
+      modified: stat.modified,
+      sizeBytes: stat.size,
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => note.isMarkdown
+            ? MarkdownViewerPage(note: note, repoRoot: widget.repoRoot)
+            : CodeViewerPage(path: file, fileName: note.fileName),
+      ),
+    );
+  }
+
+  /// GitHub 风格标题锚点匹配：小写、去特殊字符、空格转连字符（保留 CJK）。
+  int _headingIndexForAnchor(String anchor) {
+    final a = anchor.toLowerCase();
+    for (var i = 0; i < _toc.length; i++) {
+      if (_slugify(_toc[i].text) == a) return i;
+    }
+    return -1;
+  }
+
+  static String _slugify(String text) => text
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^\p{L}\p{N}\s-]'), '')
+      .trim()
+      .replaceAll(RegExp(r'\s+'), '-');
 
   void _showTocSheet() {
     if (_toc.isEmpty) {

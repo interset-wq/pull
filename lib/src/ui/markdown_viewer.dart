@@ -102,16 +102,67 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
+  /// 沉浸式顶栏：下滑隐藏、上滑/点屏幕唤出。
+  bool _appBarHidden = false;
+  double _lastScrollOffset = 0;
+
+  /// 当前所在章节（TOC 高亮），-1 表示尚未定位。
+  final _currentSection = ValueNotifier<int>(-1);
+  final List<GlobalKey> _headingKeys = [];
+  final GlobalKey _viewportKey = GlobalKey();
+  DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   void initState() {
     super.initState();
     _content = _load();
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _currentSection.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final offset = _scrollController.offset;
+    final delta = offset - _lastScrollOffset;
+    _lastScrollOffset = offset;
+    if (delta < -24 && !_appBarHidden) {
+      setState(() => _appBarHidden = true);
+    } else if (delta > 24 && _appBarHidden) {
+      setState(() => _appBarHidden = false);
+    }
+    // 章节定位节流：避免每次滚动帧都遍历标题
+    final now = DateTime.now();
+    if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
+      _lastSectionUpdate = now;
+      _updateCurrentSection();
+    }
+  }
+
+  /// 当前章节 = 最后一个已进入视口顶部的标题。
+  void _updateCurrentSection() {
+    if (_headingKeys.isEmpty || !_scrollController.hasClients) return;
+    final viewport = _viewportKey.currentContext?.findRenderObject();
+    var current = -1;
+    for (var i = 0; i < _headingKeys.length; i++) {
+      final ro = _headingKeys[i].currentContext?.findRenderObject();
+      if (ro is! RenderBox) continue;
+      final dy = viewport is! RenderBox
+          ? double.infinity
+          : ro.localToGlobal(Offset.zero, ancestor: viewport).dy;
+      if (dy <= 120) {
+        current = i;
+      }
+    }
+    if (current != _currentSection.value) {
+      _currentSection.value = current;
+    }
   }
 
   Future<String> _load() async {
@@ -128,6 +179,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
     body = MarkdownViewerPage.normalizeHtmlImages(body);
     _toc = extractToc(body);
+    _headingKeys
+      ..clear()
+      ..addAll(List.generate(_toc.length, (_) => GlobalKey()));
     _imageUrls = MarkdownViewerPage.collectImageUrls(body);
     return body;
   }
@@ -136,63 +190,57 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _title ?? widget.note.fileName,
-          overflow: TextOverflow.ellipsis,
-        ),
+      appBar: _ImmersiveAppBar(
+        hidden: _appBarHidden,
+        title: _title ?? widget.note.fileName,
+        tags: _tags,
         actions: [
-          if (_tags.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(
-                child: Text(
-                  _tags.join(' · '),
-                  style: theme.textTheme.bodySmall,
-                ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: '更多',
+            onSelected: (v) {
+              switch (v) {
+                case 'toc':
+                  _showTocSheet();
+                case 'raw':
+                  setState(() => _showRaw = !_showRaw);
+                case 'font':
+                  _showFontSheet();
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'toc', child: Text('目录')),
+              PopupMenuItem(
+                value: 'raw',
+                child: Text(_showRaw ? '渲染视图' : 'Raw 模式'),
               ),
-            ),
+              const PopupMenuItem(value: 'font', child: Text('字号')),
+            ],
+          ),
         ],
       ),
-      bottomNavigationBar: BottomAppBar(
-        height: 48,
-        child: Row(
-          children: [
-            IconButton(
-              tooltip: '目录',
-              onPressed: _showTocSheet,
-              icon: const Icon(Icons.list_outlined),
-            ),
-            IconButton(
-              tooltip: _showRaw ? '渲染视图' : 'Raw 模式',
-              onPressed: () => setState(() => _showRaw = !_showRaw),
-              icon: Icon(_showRaw ? Icons.article_outlined : Icons.data_object),
-            ),
-            const Spacer(),
-            IconButton(
-              tooltip: '字号',
-              onPressed: _showFontSheet,
-              icon: const Icon(Icons.format_size),
-            ),
-          ],
-        ),
-      ),
-      body: _showRaw
-          ? _buildRawView(theme)
-          : FutureBuilder<String>(
-        future: _content,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final fontSize = _fontSizes[_fontIndex];
-          final isDark = theme.brightness == Brightness.dark;
-          final config = _markdownConfig(theme, isDark, fontSize);
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _renderBody(snapshot.data!, theme, config),
-          );
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          if (_appBarHidden) setState(() => _appBarHidden = false);
         },
+        child: _showRaw
+            ? _buildRawView(theme)
+            : FutureBuilder<String>(
+              future: _content,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final fontSize = _fontSizes[_fontIndex];
+                final isDark = theme.brightness == Brightness.dark;
+                final config = _markdownConfig(theme, isDark, fontSize);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _renderBody(snapshot.data!, theme, config),
+                );
+              },
+            ),
       ),
     );
   }
@@ -366,7 +414,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 key: ValueKey('toc-$anchorIndex'),
                 index: anchorIndex,
                 controller: _scrollController,
-                child: widgets[idx],
+                child: _HeadingMarker(
+                  key: _headingKeys[anchorIndex],
+                  child: widgets[idx],
+                ),
               );
             }
             anchorIndex++;
@@ -376,12 +427,19 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
-    return SingleChildScrollView(
+    return Scrollbar(
+      key: _viewportKey,
       controller: _scrollController,
-      physics: const AlwaysScrollableScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
+      thumbVisibility: true,
+      thickness: 4,
+      radius: const Radius.circular(4),
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
       ),
     );
   }
@@ -560,28 +618,41 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     showModalBottomSheet<void>(
       context: context,
       builder: (context) => SafeArea(
-        child: ListView.builder(
-          itemCount: _toc.length,
-          itemBuilder: (context, i) {
-            final entry = _toc[i];
-            return ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.only(left: 16.0 * entry.level),
-              title: Text(
-                entry.text,
-                style: TextStyle(
-                  fontSize: 15 - (entry.level - 2) * 0.5,
-                  fontWeight:
-                      entry.level <= 2 ? FontWeight.w600 : FontWeight.w400,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _scrollController.scrollToIndex(
-                  i,
-                  duration: const Duration(milliseconds: 300),
+        child: ValueListenableBuilder<int>(
+          valueListenable: _currentSection,
+          builder: (context, current, _) {
+            final theme = Theme.of(context);
+            return ListView.builder(
+              itemCount: _toc.length,
+              itemBuilder: (context, i) {
+                final entry = _toc[i];
+                final isCurrent = i == current;
+                return ListTile(
+                  dense: true,
+                  selected: isCurrent,
+                  selectedTileColor:
+                      theme.colorScheme.primary.withAlpha(isCurrent ? 24 : 0),
+                  contentPadding: EdgeInsets.only(left: 16.0 * entry.level),
+                  title: Text(
+                    entry.text,
+                    style: TextStyle(
+                      fontSize: 15 - (entry.level - 2) * 0.5,
+                      fontWeight:
+                          entry.level <= 2 || isCurrent
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                      color: isCurrent ? theme.colorScheme.primary : null,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _scrollController.scrollToIndex(
+                      i,
+                      duration: const Duration(milliseconds: 300),
+                    );
+                  },
                 );
               },
             );
@@ -648,14 +719,19 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            child: SelectableText(
-              raw,
-              style: kCodeFontStyle.copyWith(
-                fontSize: 13,
-                height: 1.6,
-                color: theme.colorScheme.onSurface,
+          child: Scrollbar(
+            thumbVisibility: true,
+            thickness: 4,
+            radius: const Radius.circular(4),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              child: SelectableText(
+                raw,
+                style: kCodeFontStyle.copyWith(
+                  fontSize: 13,
+                  height: 1.6,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
             ),
           ),
@@ -750,4 +826,114 @@ class _H2Config extends H2Config {
 
   @override
   HeadingDivider? get divider => null;
+}
+
+/// 标题标记：给 markdown_widget 生成的标题挂 GlobalKey，
+/// 供“当前章节”定位使用（不影响 AutoScrollTag 的锚点跳转）。
+class _HeadingMarker extends StatefulWidget {
+  const _HeadingMarker({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_HeadingMarker> createState() => _HeadingMarkerState();
+}
+
+class _HeadingMarkerState extends State<_HeadingMarker> {
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 沉浸式顶栏：高度随 hidden 状态动画收展（下滑隐藏 / 上滑或点屏唤出）。
+class _ImmersiveAppBar extends StatefulWidget implements PreferredSizeWidget {
+  const _ImmersiveAppBar({
+    required this.hidden,
+    required this.title,
+    required this.tags,
+    required this.actions,
+  });
+
+  final bool hidden;
+  final String title;
+  final List<String> tags;
+  final List<Widget> actions;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  State<_ImmersiveAppBar> createState() => _ImmersiveAppBarState();
+}
+
+class _ImmersiveAppBarState extends State<_ImmersiveAppBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: widget.hidden ? 0 : 1,
+  );
+
+  @override
+  void didUpdateWidget(_ImmersiveAppBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.hidden != widget.hidden) {
+      widget.hidden ? _controller.reverse() : _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canPop = Navigator.of(context).canPop();
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = Curves.easeInOut.transform(_controller.value);
+        return FadeTransition(
+          opacity: AlwaysStoppedAnimation(t),
+          child: Container(
+            height: kToolbarHeight * t,
+            clipBehavior: Clip.hardEdge,
+            color: theme.colorScheme.surface,
+            child: Row(
+              children: [
+                if (canPop)
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      widget.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ),
+                ),
+                if (widget.tags.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      widget.tags.join(' · '),
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ...widget.actions,
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

@@ -41,6 +41,7 @@ dependencies:
   flutter_highlight: ^0.7.0
   scroll_to_index: ^3.0.1
   flutter_svg: ^2.3.0
+  archive: ^4.5.2
 
 dev_dependencies:
   flutter_test:

@@ -5,6 +5,8 @@ import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
 
+import 'code_font.dart';
+
 /// 代码文件只读查看页：语法高亮（对标 GitHub mobile 的代码浏览体验）。
 class CodeViewerPage extends StatefulWidget {
   const CodeViewerPage({required this.path, required this.fileName, super.key});
@@ -100,9 +102,8 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                 language: _language,
                 theme: isDark ? atomOneDarkTheme : githubTheme,
                 padding: const EdgeInsets.all(16),
-                textStyle: const TextStyle(
+                textStyle: kCodeFontStyle.copyWith(
                   fontSize: 13,
-                  fontFamily: 'monospace',
                   height: 1.5,
                 ),
               ),

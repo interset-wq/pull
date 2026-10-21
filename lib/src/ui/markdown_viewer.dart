@@ -12,6 +12,7 @@ import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
 import '../notes/toc.dart';
 import 'copy_button.dart';
+import 'code_font.dart';
 import 'h_scrollbar.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
@@ -144,7 +145,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         ),
         const ListConfig(),
         CodeConfig(
-          style: TextStyle(
+          style: kCodeFontStyle.copyWith(
             backgroundColor: isDark
                 ? theme.colorScheme.surfaceContainerHighest.withAlpha(204)
                 : const Color(0xCCeff1f3),
@@ -268,9 +269,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               language: language,
               theme: isDark ? atomOneDarkTheme : githubTheme,
               padding: const EdgeInsets.all(12),
-              textStyle: const TextStyle(
+              textStyle: kCodeFontStyle.copyWith(
                 fontSize: 13,
-                fontFamily: 'monospace',
                 height: 1.5,
               ),
             ),

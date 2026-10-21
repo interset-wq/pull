@@ -39,6 +39,7 @@ dependencies:
   markdown_widget: ^2.3.2+8
   path_provider: ^2.1.6
   flutter_highlight: ^0.7.0
+  scroll_to_index: ^3.0.1
 
 dev_dependencies:
   flutter_test:

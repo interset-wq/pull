@@ -1,7 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown_widget/markdown_widget.dart';
+import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
@@ -33,11 +37,18 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _tags = const [];
   List<TocEntry> _toc = const [];
   late Future<String> _content;
+  final _scrollController = AutoScrollController();
 
   @override
   void initState() {
     super.initState();
     _content = _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<String> _load() async {
@@ -139,13 +150,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             color: theme.colorScheme.onSurface,
           ),
         ),
+        TableConfig(
+          wrapper: (child) =>
+              SingleChildScrollView( // 表格超宽时水平滚动，避免截断
+                scrollDirection: Axis.horizontal,
+                child: child,
+              ),
+        ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),
       ],
     );
   }
 
-  /// 正文渲染：按 GFM 告警块分割，告警渲染为彩色提示框。
+  /// 正文渲染：按 GFM 告警块分割，告警渲染为彩色提示框；
+  /// 标题挂 AutoScrollTag 供目录锚点跳转。
   Widget _renderBody(
     String content,
     ThemeData theme,
@@ -153,21 +172,56 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     final generator = MarkdownGenerator();
     final children = <Widget>[];
+    final collected = <TocEntry>[];
+    var anchorIndex = 0;
     for (final segment in splitGfmAlerts(content)) {
       switch (segment) {
         case TextSegment(:final text):
-          children.addAll(generator.buildWidgets(text, config: config));
+          List<Toc>? tocs;
+          final widgets = generator.buildWidgets(
+            text,
+            config: config,
+            onTocList: (list) => tocs = list,
+          );
+          final tocList = tocs ?? const <Toc>[];
+          for (final toc in tocList) {
+            final idx = toc.widgetIndex;
+            if (idx >= 0 && idx < widgets.length) {
+              widgets[idx] = AutoScrollTag(
+                key: ValueKey('toc-$anchorIndex'),
+                index: anchorIndex,
+                controller: _scrollController,
+                child: widgets[idx],
+              );
+            }
+            anchorIndex++;
+          }
+          children.addAll(widgets);
         case AlertSegment(:final type, :final body):
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_listEquals(collected, _toc)) {
+        setState(() => _toc = collected);
+      }
+    });
     return SingleChildScrollView(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: children,
       ),
     );
+  }
+
+  static bool _listEquals(List<TocEntry> a, List<TocEntry> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].level != b[i].level || a[i].text != b[i].text) return false;
+    }
+    return true;
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。
@@ -217,29 +271,33 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         GfmAlertType.caution => Icons.dangerous_outlined,
       };
 
-  /// 代码块配置：配色跟随全局明暗主题，右上角一键复制。
+  /// 代码块配置：flutter_highlight 语法高亮（跟随主题），右上角一键复制。
   PreConfig _preConfig(ThemeData theme, bool isDark) {
-    final codeBg = isDark
-        ? theme.colorScheme.surfaceContainerHighest
-        : const Color(0xffeff1f3);
     return PreConfig(
-      decoration: BoxDecoration(
-        color: codeBg,
-        borderRadius: const BorderRadius.all(Radius.circular(8)),
-      ),
-      textStyle: TextStyle(
-        fontSize: 14,
-        color: theme.colorScheme.onSurface,
-      ),
-      wrapper: (child, code, language) => Stack(
-        children: [
-          child,
-          Positioned(
-            top: 4,
-            right: 4,
-            child: CopyButton(code: code),
-          ),
-        ],
+      padding: EdgeInsets.zero,
+      decoration: const BoxDecoration(),
+      builder: (code, language) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Stack(
+          children: [
+            HighlightView(
+              code,
+              language: language,
+              theme: isDark ? atomOneDarkTheme : githubTheme,
+              padding: const EdgeInsets.all(12),
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontFamily: 'monospace',
+                height: 1.5,
+              ),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: CopyButton(code: code),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -274,7 +332,13 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                _scrollController.scrollToIndex(
+                  i,
+                  duration: const Duration(milliseconds: 300),
+                );
+              },
             );
           },
         ),

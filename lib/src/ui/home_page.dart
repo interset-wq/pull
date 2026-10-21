@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -209,6 +210,16 @@ class _HomePageState extends State<HomePage> {
       );
       await _loadRepos();
       closeBusy();
+    } on TimeoutException {
+      closeBusy();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('克隆超时：请检查手机网络（Wi-Fi DNS / 移动数据）后重试'),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
     } on Exception catch (e) {
       closeBusy();
       if (mounted) {

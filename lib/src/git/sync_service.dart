@@ -26,6 +26,7 @@ class GitSyncService {
     final url = repo.cloneUrl;
     final branch = repo.defaultBranch;
     final targetPath = target.path;
+    // 超时保护：设备网络异常（如 DNS 无法解析）时 libgit2 会无限挂起
     await Isolate.run(() {
       final r = Repository.clone(
         url: url,
@@ -33,7 +34,7 @@ class GitSyncService {
         checkoutBranch: branch,
       );
       r.free();
-    });
+    }).timeout(const Duration(minutes: 5));
     return targetPath;
   }
 
@@ -42,7 +43,8 @@ class GitSyncService {
   /// 只处理 fast-forward 场景：本地有独立提交或产生冲突时抛出
   /// [SyncException]，由上层 UI 决定如何提示——绝不做破坏性操作。
   Future<PullResult> pull({required Directory repoDir}) =>
-      Isolate.run(() => _pullAt(repoDir.path));
+      Isolate.run(() => _pullAt(repoDir.path))
+          .timeout(const Duration(minutes: 5));
 
   static PullResult _pullAt(String path) {
     final r = Repository.open(path);

@@ -105,7 +105,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _showCloneDialog() async {
     final urlCtrl = TextEditingController();
-    final tokenCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -119,16 +118,6 @@ class _HomePageState extends State<HomePage> {
               decoration: const InputDecoration(
                 labelText: '仓库地址',
                 hintText: 'https://…/notes.git',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tokenCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '访问 Token',
-                hintText: '私有仓库必填，公开仓库可留空',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -163,7 +152,6 @@ class _HomePageState extends State<HomePage> {
       await _sync.clone(
         repo: info,
         parentDir: await _reposRoot,
-        token: tokenCtrl.text.trim(),
       );
       await _loadRepos();
     } on Exception catch (e) {
@@ -480,7 +468,6 @@ class _RepoPageState extends State<RepoPage> {
     try {
       final result = await GitSyncService().pull(
         repoDir: widget.repoDir,
-        token: '', // V1：公开仓库
       );
       _refresh();
       if (mounted) {

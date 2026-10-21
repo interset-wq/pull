@@ -4,17 +4,13 @@ import 'package:git2dart/git2dart.dart';
 
 import '../platforms/repo_info.dart';
 
-/// 本地仓库同步服务：封装 git2dart 的克隆 / pull / commit / push。
-/// 所有 git 操作必须经由本服务，业务代码不直接触碰 git2dart。
+/// 本地仓库同步服务：封装 git2dart 的克隆 / pull。
+/// 仅支持公开仓库，匿名访问，无需任何凭据。
 class GitSyncService {
   /// 克隆 [repo] 到 [parentDir] 下的同名目录。
-  ///
-  /// [token] 为对应平台的 PAT，作为 HTTPS Basic 凭据使用
-  /// （用户名任意，密码用 token）。
   Future<String> clone({
     required RepoInfo repo,
     required Directory parentDir,
-    required String token,
   }) async {
     final target = Directory(
       '${parentDir.path}${Platform.pathSeparator}${repo.name}',
@@ -26,7 +22,6 @@ class GitSyncService {
       url: repo.cloneUrl,
       localPath: target.path,
       checkoutBranch: repo.defaultBranch,
-      callbacks: _credentials(token),
     );
     r.free();
     return target.path;
@@ -36,14 +31,11 @@ class GitSyncService {
   ///
   /// 只处理 fast-forward 场景：本地有独立提交或产生冲突时抛出
   /// [SyncException]，由上层 UI 决定如何提示——绝不做破坏性操作。
-  Future<PullResult> pull({
-    required Directory repoDir,
-    required String token,
-  }) async {
+  Future<PullResult> pull({required Directory repoDir}) async {
     final r = Repository.open(repoDir.path);
     try {
       final remote = Remote.lookup(repo: r, name: 'origin');
-      remote.fetch(callbacks: _credentials(token));
+      remote.fetch();
       remote.free();
 
       final branch = _currentBranch(r);
@@ -75,10 +67,6 @@ class GitSyncService {
       r.free();
     }
   }
-
-  Callbacks _credentials(String token) => token.isEmpty
-      ? const Callbacks()
-      : Callbacks(credentials: UserPass(username: token, password: token));
 
   String _currentBranch(Repository r) {
     final head = r.head;

@@ -6,7 +6,7 @@ import 'git_platform.dart';
 import 'repo_info.dart';
 import 'repository_adapter.dart';
 
-/// Gitee API v5 适配器（token 走 access_token 参数）。
+/// Gitee API v5 适配器（仅公开仓库，无需凭据）。
 class GiteeAdapter implements RepositoryAdapter {
   GiteeAdapter({http.Client? client}) : _client = client ?? http.Client();
 
@@ -14,37 +14,12 @@ class GiteeAdapter implements RepositoryAdapter {
 
   Map<String, String> _headers() => {'Accept': 'application/json'};
 
-  Uri _uri(String path, String token, [Map<String, String>? extra]) {
-    final params = <String, String>{'access_token': token, ...?extra};
-    return Uri.parse('${GitPlatform.gitee.apiBase}$path')
-        .replace(queryParameters: params);
-  }
+  Uri _uri(String path) => Uri.parse('${GitPlatform.gitee.apiBase}$path');
 
   @override
-  Future<void> validateToken(String token) async {
-    final res = await _client.get(_uri('/user', token), headers: _headers());
-    if (res.statusCode != 200) {
-      throw AdapterException('Gitee token 无效', statusCode: res.statusCode);
-    }
-  }
-
-  @override
-  Future<List<RepoInfo>> listRepos(String token) async {
+  Future<RepoInfo> getRepo(String owner, String name) async {
     final res = await _client.get(
-      _uri('/user/repos', token, {'per_page': '100'}),
-      headers: _headers(),
-    );
-    _check(res.statusCode, '获取 Gitee 仓库列表失败');
-    final list = jsonDecode(utf8.decode(res.bodyBytes)) as List;
-    return list
-        .map((e) => _fromRepo(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  @override
-  Future<RepoInfo> getRepo(String owner, String name, String token) async {
-    final res = await _client.get(
-      _uri('/repos/$owner/$name', token),
+      _uri('/repos/$owner/$name'),
       headers: _headers(),
     );
     _check(res.statusCode, '获取 Gitee 仓库 $owner/$name 失败');

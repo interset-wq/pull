@@ -30,14 +30,12 @@ void main() {
     final path = await sync.clone(
       repo: repo,
       parentDir: parent,
-      token: '', // 公开仓库不需要凭据
     );
     print('cloned to $path');
     expect(Directory(path).existsSync(), isTrue);
 
     final result = await sync.pull(
       repoDir: Directory(path),
-      token: '',
     );
     print('pull result: $result');
     expect(

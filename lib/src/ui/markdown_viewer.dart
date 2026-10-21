@@ -172,7 +172,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           marker: (isOrdered, depth, index) {
             if (isOrdered) {
               return Text(
-                '$index.',
+                '${index + 1}.',
                 style: TextStyle(
                   color: theme.colorScheme.primary,
                   fontSize: fontSize,

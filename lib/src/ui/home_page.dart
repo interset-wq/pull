@@ -89,6 +89,7 @@ class _HomePageState extends State<HomePage> {
                           name: name,
                           noteCount: count,
                           onTap: () => _openRepo(repo),
+                          onDelete: () => _confirmDelete(repo),
                         );
                       },
                     ),
@@ -101,6 +102,37 @@ class _HomePageState extends State<HomePage> {
       context,
       MaterialPageRoute<void>(builder: (_) => RepoPage(repoDir: repoDir)),
     );
+  }
+
+  Future<void> _confirmDelete(Directory repo) async {
+    final name = repo.path.split(Platform.pathSeparator).last;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除仓库'),
+        content: Text('将从本地删除 $name 及其全部内容，远端仓库不受影响。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _sync.deleteRepo(repo.path);
+      await _loadRepos();
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('删除失败: $e')));
+      }
+    }
   }
 
   Future<void> _showCloneDialog() async {
@@ -139,6 +171,7 @@ class _HomePageState extends State<HomePage> {
 
     final url = urlCtrl.text.trim();
     if (url.isEmpty) return;
+    if (!mounted) return;
     final name = url.split('/').last.replaceAll('.git', '');
     final info = RepoInfo(
       platform: _guessPlatform(url),
@@ -148,13 +181,36 @@ class _HomePageState extends State<HomePage> {
       defaultBranch: 'main',
     );
     setState(() => _cloning = true);
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    var busyClosed = false;
+    void closeBusy() {
+      if (busyClosed) return;
+      busyClosed = true;
+      rootNav.pop();
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 24),
+            Expanded(child: Text('正在克隆仓库…')),
+          ],
+        ),
+      ),
+    );
     try {
       await _sync.clone(
         repo: info,
         parentDir: await _reposRoot,
       );
       await _loadRepos();
+      closeBusy();
     } on Exception catch (e) {
+      closeBusy();
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('克隆失败: $e')));
@@ -205,11 +261,17 @@ class _EmptyState extends StatelessWidget {
 
 /// 仓库卡片。
 class _RepoCard extends StatelessWidget {
-  const _RepoCard({required this.name, required this.noteCount, required this.onTap});
+  const _RepoCard({
+    required this.name,
+    required this.noteCount,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   final String name;
   final int noteCount;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -242,6 +304,12 @@ class _RepoCard extends StatelessWidget {
                         style: theme.textTheme.bodySmall),
                   ],
                 ),
+              ),
+              IconButton(
+                tooltip: '删除仓库',
+                icon: const Icon(Icons.delete_outline),
+                color: theme.colorScheme.outline,
+                onPressed: onDelete,
               ),
               const Icon(Icons.chevron_right),
             ],

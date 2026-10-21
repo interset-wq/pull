@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-/// 统一图片加载：相对路径解析为仓库本地文件，网络图片直接加载，
-/// 失败统一展示占位。
+/// 统一图片加载：相对路径基于 [baseDir]（markdown 文件所在目录）解析，
+/// 支持 ./ 与 ../ 相对层级；网络图片直接加载，失败统一展示占位。
 Widget buildRepoImage(
   String url, {
-  required String repoRoot,
+  required String baseDir,
   BoxFit fit = BoxFit.contain,
 }) {
   final clean = url.trim();
@@ -14,6 +14,7 @@ Widget buildRepoImage(
     return Image.network(
       clean,
       fit: fit,
+      headers: const {'User-Agent': 'Mozilla/5.0'},
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
         return const SizedBox(
@@ -25,16 +26,37 @@ Widget buildRepoImage(
       errorBuilder: (_, _, _) => const _ImageErrorBox(),
     );
   }
-  final file = File(
-    '$repoRoot${Platform.pathSeparator}'
-    '${clean.replaceAll('/', Platform.pathSeparator)}',
-  );
-  if (!file.existsSync()) return const _ImageErrorBox();
   return Image.file(
-    file,
+    _resolveLocal(clean, baseDir),
     fit: fit,
     errorBuilder: (_, _, _) => const _ImageErrorBox(),
   );
+}
+
+/// 相对路径基于 baseDir 解析；绝对路径原样使用；归一化 ./ 与 ../。
+File _resolveLocal(String src, String baseDir) {
+  final isAbsolute =
+      src.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(src);
+  final joined = isAbsolute
+      ? src
+      : '$baseDir${Platform.pathSeparator}'
+          '${src.replaceAll('/', Platform.pathSeparator)}';
+  return File(_normalize(joined));
+}
+
+String _normalize(String path) {
+  final hasDrive = RegExp(r'^[A-Za-z]:').hasMatch(path);
+  final out = <String>[];
+  for (final part in path.replaceAll('\\', '/').split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      if (out.isNotEmpty && !out.last.endsWith(':')) out.removeLast();
+      continue;
+    }
+    out.add(part);
+  }
+  final joined = out.join('/');
+  return hasDrive ? joined : '/$joined';
 }
 
 class _ImageErrorBox extends StatelessWidget {

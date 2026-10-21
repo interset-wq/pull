@@ -6,13 +6,13 @@ import 'repo_image.dart';
 class ImageGalleryPage extends StatefulWidget {
   const ImageGalleryPage({
     required this.sources,
-    required this.repoRoot,
+    required this.baseDir,
     this.initialIndex = 0,
     super.key,
   });
 
   final List<String> sources;
-  final String repoRoot;
+  final String baseDir;
   final int initialIndex;
 
   @override
@@ -57,7 +57,7 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
           child: Center(
             child: buildRepoImage(
               widget.sources[index],
-              repoRoot: widget.repoRoot,
+              baseDir: widget.baseDir,
             ),
           ),
         ),

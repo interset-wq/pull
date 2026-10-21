@@ -581,6 +581,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
+  /// markdown 文件所在目录，相对图片的解析基准。
+  String get _noteDir => File(widget.note.absolutePath).parent.path;
+
   /// 正文图片：统一加载（本地/网络），点击进入图片阅读器。
   Widget _buildImage(String url) {
     final src = url.trim();
@@ -591,7 +594,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: buildRepoImage(src, repoRoot: widget.repoRoot),
+          child: buildRepoImage(src, baseDir: _noteDir),
         ),
       ),
     );
@@ -604,7 +607,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       MaterialPageRoute<void>(
         builder: (_) => ImageGalleryPage(
           sources: _imageUrls,
-          repoRoot: widget.repoRoot,
+          baseDir: _noteDir,
           initialIndex: index,
         ),
       ),

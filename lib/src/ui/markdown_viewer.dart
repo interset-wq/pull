@@ -899,6 +899,9 @@ class _ImmersiveAppBarState extends State<_ImmersiveAppBar>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 与标准 AppBar 一致：自身高度包含状态栏 inset，
+    // Scaffold 把 app bar 槽位放在屏幕顶端，不含 inset 时内容藏在状态栏后
+    final topPadding = MediaQuery.of(context).padding.top;
     final canPop = Navigator.of(context).canPop();
     return AnimatedBuilder(
       animation: _controller,
@@ -906,39 +909,43 @@ class _ImmersiveAppBarState extends State<_ImmersiveAppBar>
         final t = Curves.easeInOut.transform(_controller.value);
         return FadeTransition(
           opacity: AlwaysStoppedAnimation(t),
-          child: Container(
-            height: kToolbarHeight * t,
-            clipBehavior: Clip.hardEdge,
+          child: Material(
             color: theme.colorScheme.surface,
-            child: Row(
-              children: [
-                if (canPop)
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      widget.title,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge,
+            child: ClipRect(
+              child: Container(
+                height: (topPadding + kToolbarHeight) * t,
+                padding: EdgeInsets.only(top: topPadding * t),
+                child: Row(
+                  children: [
+                    if (canPop)
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          widget.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (widget.tags.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          widget.tags.join(' · '),
+                          style: theme.textTheme.bodySmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ...widget.actions,
+                  ],
                 ),
-                if (widget.tags.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      widget.tags.join(' · '),
-                      style: theme.textTheme.bodySmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ...widget.actions,
-              ],
+              ),
             ),
           ),
         );

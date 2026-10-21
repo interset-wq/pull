@@ -482,14 +482,28 @@ class _RepoPageState extends State<RepoPage> {
                   : ListView(
                       padding: const EdgeInsets.only(bottom: 32),
                       children: [
-                        // 子文件夹（保持原目录结构）
+                        // 子文件夹（保持原目录结构），尾部显示文件数
                         for (final name in dirs)
                           ListTile(
+                            dense: true,
+                            minVerticalPadding: 4,
                             leading: Icon(
                               Icons.folder_outlined,
                               color: theme.colorScheme.primary,
+                              size: 22,
                             ),
-                            title: Text(name),
+                            title: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                            trailing: Text(
+                              '${_dirFileCount(name)} 个文件',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute<void>(
@@ -502,29 +516,46 @@ class _RepoPageState extends State<RepoPage> {
                               ),
                             ),
                           ),
-                        // 当前目录下的笔记与代码文件
+                        // 当前目录下的笔记与代码文件（单行紧凑）
                         for (final note in notes)
                           ListTile(
+                            dense: true,
+                            minVerticalPadding: 4,
                             leading: Icon(
                               note.isMarkdown
                                   ? Icons.description_outlined
                                   : Icons.code_outlined,
                               color: note.isMarkdown
-                                  ? null
-                                  : Theme.of(context).colorScheme.secondary,
+                                  ? theme.colorScheme.onSurfaceVariant
+                                  : theme.colorScheme.secondary,
+                              size: 22,
                             ),
                             title: Text(
                               '${note.fileName}${note.extension}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium,
                             ),
                             subtitle: searching
                                 ? Text(
                                     note.relativePath,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme
+                                          .onSurfaceVariant,
+                                    ),
                                   )
-                                : Text(_fmtTime(note.modified)),
+                                : null,
+                            trailing: searching
+                                ? null
+                                : Text(
+                                    _fmtTime(note.modified),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                                  ),
                             onTap: () => _openFile(note),
                           ),
                       ],
@@ -543,6 +574,16 @@ class _RepoPageState extends State<RepoPage> {
             n.fileName.toLowerCase().contains(_query) ||
             n.relativePath.toLowerCase().contains(_query))
         .toList();
+  }
+
+  /// 当前目录下某子文件夹内的文件数（含嵌套）。
+  int _dirFileCount(String dirName) {
+    final prefix = widget.subPath.isEmpty
+        ? '$dirName/'
+        : '${widget.subPath}/$dirName/';
+    return (_allNotes ?? const <NoteFile>[])
+        .where((n) => n.relativePath.startsWith(prefix))
+        .length;
   }
 
   void _openFile(NoteFile note) {

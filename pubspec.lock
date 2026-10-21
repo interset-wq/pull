@@ -153,7 +153,7 @@ packages:
     source: hosted
     version: "0.5.6"
   git2dart_binaries:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: git2dart_binaries
       sha256: d876a7a48170a53a7b50fc65de42b8ab5e1b8a7e1902747e5ceb308b054c887d

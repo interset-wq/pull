@@ -1,9 +1,23 @@
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:git2dart/git2dart.dart';
+import 'package:git2dart_binaries/git2dart_binaries.dart'
+    show AndroidSSLHelper;
 
 import 'src/ui/home_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    // 必须先初始化 libgit2，再配置 CA 证书路径；
+    // Android 系统证书库对静态链接的 OpenSSL 不可达，不配置则 HTTPS 克隆
+    // 报 "the SSL certificate is invalid"
+    Libgit2.version;
+    final certPath = await AndroidSSLHelper.initialize();
+    Libgit2.setSSLCertLocations(file: certPath);
+  }
   runApp(const ReaderApp());
 }
 

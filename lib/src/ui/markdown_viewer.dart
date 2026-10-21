@@ -29,6 +29,48 @@ class MarkdownViewerPage extends StatefulWidget {
   final NoteFile note;
   final String repoRoot;
 
+  /// 匹配 <img src="...">（属性顺序任意、单双引号均可、含尾部其余属性）。
+  static final RegExp _htmlImgRegExp = RegExp(
+    r'''<img[^>]*\ssrc=["']([^"']+)["'][^>]*>''',
+    caseSensitive: false,
+  );
+
+  /// [![alt](img)](link) 徽章式链接图片展平为纯图片。
+  static final RegExp _badgeLinkImgRegExp = RegExp(
+    r'\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)]+)\)',
+  );
+
+  /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
+  /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
+  static String normalizeHtmlImages(String md) {
+    return md
+        .replaceAllMapped(
+          _htmlImgRegExp,
+          (m) => '\n\n![](${m.group(1)!})\n\n',
+        )
+        .replaceAllMapped(
+          _badgeLinkImgRegExp,
+          (m) => '![${m.group(1)!}](${m.group(2)!})',
+        )
+        // 无 src 的空 img 标签（<img> / <img />）与其余 img 残壳直接移除
+        .replaceAll(RegExp(r'<img\b[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</?a\b[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</?div[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</?picture[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<source\b[^>]*/?>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</?center[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
+        .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n');
+  }
+
+  /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。
+  static List<String> collectImageUrls(String body) => RegExp(
+        r'!\[[^\]]*\]\(([^)\s]+)\)',
+      )
+          .allMatches(body)
+          .map((m) => m.group(1)!)
+          .toList();
+
   @override
   State<MarkdownViewerPage> createState() => _MarkdownViewerPageState();
 }
@@ -70,48 +112,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _tags = fm.tags;
       body = fm.body;
     }
-    body = _normalizeHtmlImages(body);
+    body = MarkdownViewerPage.normalizeHtmlImages(body);
     _toc = extractToc(body);
-    _imageUrls = _collectImageUrls(body);
+    _imageUrls = MarkdownViewerPage.collectImageUrls(body);
     return body;
   }
-
-  /// 匹配 <img src="...">（属性顺序任意、单双引号均可）。
-  static final RegExp _htmlImgRegExp = RegExp(
-    r'''<img[^>]*\ssrc=["']([^"']+)["']''',
-    caseSensitive: false,
-  );
-
-  /// [![alt](img)](link) 徽章式链接图片展平为纯图片。
-  static final RegExp _badgeLinkImgRegExp = RegExp(
-    r'\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)]+)\)',
-  );
-
-  /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
-  /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
-  static String _normalizeHtmlImages(String md) {
-    return md
-        .replaceAllMapped(
-          _htmlImgRegExp,
-          (m) => '\n\n![](${m.group(1)!})\n\n',
-        )
-        .replaceAllMapped(
-          _badgeLinkImgRegExp,
-          (m) => '![${m.group(1)!}](${m.group(2)!})',
-        )
-        .replaceAll(RegExp(r'</?a\b[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?div[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
-        .replaceAll(RegExp(r'</?p[^>]*>', caseSensitive: false), '\n\n');
-  }
-
-  /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。
-  static List<String> _collectImageUrls(String body) => RegExp(
-        r'!\[[^\]]*\]\(([^)\s]+)\)',
-      )
-          .allMatches(body)
-          .map((m) => m.group(1)!)
-          .toList();
 
   @override
   Widget build(BuildContext context) {

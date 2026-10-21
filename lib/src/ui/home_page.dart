@@ -199,7 +199,7 @@ class _EmptyState extends StatelessWidget {
             size: 72, color: theme.colorScheme.primary.withAlpha(120)),
         const SizedBox(height: 16),
         Center(
-          child: Text('把你的笔记仓库装进口袋',
+          child: Text('把你的仓库装进口袋',
               style: theme.textTheme.titleMedium),
         ),
         const SizedBox(height: 24),
@@ -250,7 +250,7 @@ class _RepoCard extends StatelessWidget {
                         style: theme.textTheme.titleMedium,
                         overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
-                    Text('$noteCount 篇笔记',
+                    Text('$noteCount 个文件',
                         style: theme.textTheme.bodySmall),
                   ],
                 ),
@@ -354,7 +354,7 @@ class _RepoPageState extends State<RepoPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: SearchBar(
-              hintText: searching ? '搜索中…' : '搜索笔记',
+              hintText: searching ? '搜索中…' : '搜索文件',
               leading: const Icon(Icons.search),
               elevation: const WidgetStatePropertyAll(0),
               constraints: const BoxConstraints(minHeight: 44),
@@ -375,7 +375,7 @@ class _RepoPageState extends State<RepoPage> {
               child: isEmpty
                   ? ListView(children: const [
                       SizedBox(height: 120),
-                      Center(child: Text('这里没有笔记')),
+                      Center(child: Text('这里没有文件')),
                     ])
                   : ListView(
                       padding: const EdgeInsets.only(bottom: 32),
@@ -412,7 +412,7 @@ class _RepoPageState extends State<RepoPage> {
                                   : Theme.of(context).colorScheme.secondary,
                             ),
                             title: Text(
-                              note.fileName,
+                              '${note.fileName}${note.extension}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),

@@ -25,10 +25,16 @@ class _HScrollbarState extends State<HScrollbar> {
     return Scrollbar(
       controller: _controller,
       thumbVisibility: true,
-      child: SingleChildScrollView(
-        controller: _controller,
-        scrollDirection: Axis.horizontal,
-        child: widget.child,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          controller: _controller,
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            // 块元素化：内容至少占满视口宽度，少内容的代码块不再缩成窄条
+            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+            child: widget.child,
+          ),
+        ),
       ),
     );
   }

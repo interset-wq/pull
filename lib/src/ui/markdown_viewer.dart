@@ -258,42 +258,52 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   /// 代码块配置：flutter_highlight 语法高亮（跟随主题），右上角一键复制。
   PreConfig _preConfig(ThemeData theme, bool isDark) {
+    final highlightTheme = isDark ? atomOneDarkTheme : githubTheme;
     return PreConfig(
       padding: EdgeInsets.zero,
       decoration: const BoxDecoration(),
-      builder: (code, language) => HScrollbar(
-        child: Stack(
-          children: [
-            HighlightView(
-              code,
-              language: language,
-              theme: isDark ? atomOneDarkTheme : githubTheme,
-              padding: const EdgeInsets.only(top: 28, left: 12, right: 12, bottom: 12),
-              textStyle: kCodeFontStyle.copyWith(
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-            if (language.isNotEmpty)
-              Positioned(
-                top: 4,
-                left: 12,
-                child: Text(
-                  language,
-                  style: kCodeFontStyle.copyWith(
-                    fontSize: 11,
-                    color: theme.colorScheme.onSurfaceVariant,
+      builder: (code, language) {
+        // 与 HighlightView 的主题背景同色，块元素化占满视口宽度
+        final bg = highlightTheme['root']?.backgroundColor;
+        return Container(
+          width: double.infinity,
+          color: bg,
+          child: HScrollbar(
+            child: Stack(
+              children: [
+                HighlightView(
+                  code,
+                  language: language,
+                  theme: highlightTheme,
+                  padding: const EdgeInsets.only(
+                      top: 28, left: 12, right: 12, bottom: 12),
+                  textStyle: kCodeFontStyle.copyWith(
+                    fontSize: 13,
+                    height: 1.5,
                   ),
                 ),
-              ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: CopyButton(code: code),
+                if (language.isNotEmpty)
+                  Positioned(
+                    top: 4,
+                    left: 12,
+                    child: Text(
+                      language,
+                      style: kCodeFontStyle.copyWith(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: CopyButton(code: code),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

@@ -134,14 +134,15 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     return MarkdownConfig(
       configs: [
-        H1Config(
+        _H1Config(
           style: theme.textTheme.headlineLarge!.copyWith(
             height: 1.35,
             fontWeight: FontWeight.w700,
             color: theme.colorScheme.onSurface,
           ),
+          dividerColor: theme.colorScheme.outlineVariant,
         ),
-        H2Config(
+        _H2Config(
           style: theme.textTheme.headlineSmall!.copyWith(
             height: 1.35,
             fontWeight: FontWeight.w700,
@@ -168,7 +169,38 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             height: 1.75,
           ),
         ),
-        const ListConfig(),
+        ListConfig(
+          marker: (isOrdered, depth, index) {
+            if (isOrdered) {
+              return Text(
+                '$index.',
+                style: TextStyle(
+                  color: theme.colorScheme.primary,
+                  fontSize: fontSize,
+                  height: 1.75,
+                  fontWeight: FontWeight.w600,
+                ),
+              );
+            }
+            return Container(
+              width: (6 - depth).toDouble(),
+              height: (6 - depth).toDouble(),
+              margin: const EdgeInsets.only(top: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary
+                    .withAlpha(255 - depth * 60),
+                shape: BoxShape.circle,
+              ),
+            );
+          },
+        ),
+        CheckBoxConfig(
+          builder: (checked) => Icon(
+            checked ? Icons.check_box : Icons.check_box_outline_blank,
+            size: 20,
+            color: theme.colorScheme.primary,
+          ),
+        ),
         LinkConfig(
           style: theme.textTheme.bodyLarge!.copyWith(
             fontSize: fontSize,
@@ -196,6 +228,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         TableConfig(
+          headerRowDecoration: BoxDecoration(
+            color: theme.colorScheme.primary.withAlpha(25),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+          ),
+          headerStyle: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurface,
+          ),
+          bodyStyle: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurface,
+          ),
+          border: TableBorder.all(
+            color: theme.colorScheme.outlineVariant,
+            width: 1,
+            borderRadius: BorderRadius.circular(6),
+          ),
           wrapper: (child) => HScrollbar(child: child),
         ),
         _preConfig(theme, isDark),
@@ -212,7 +260,19 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     ThemeData theme,
     MarkdownConfig config,
   ) {
-    final generator = MarkdownGenerator();
+    final generator = MarkdownGenerator(
+      generators: [
+        SpanNodeGeneratorWithTag(
+          tag: 'blockquote',
+          generator: (element, config, visitor) => _CardBlockquoteNode(
+            visitor,
+            backgroundColor:
+                theme.colorScheme.surfaceContainerHighest.withAlpha(70),
+            barColor: theme.colorScheme.primary.withAlpha(160),
+          ),
+        ),
+      ],
+    );
     final children = <Widget>[];
     var anchorIndex = 0;
     for (final segment in splitGfmAlerts(content)) {
@@ -229,30 +289,28 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             final idx = toc.widgetIndex;
             if (idx >= 0 && idx < widgets.length) {
               final level = _headingLevel(toc.node.headingConfig);
-              widgets[idx] = Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  AutoScrollTag(
-                    key: ValueKey('toc-$anchorIndex'),
-                    index: anchorIndex,
-                    controller: _scrollController,
-                    child: widgets[idx],
-                  ),
-                  if (level != null)
-                    Positioned(
-                      top: 2,
-                      right: 0,
-                      child: Text(
-                        'H$level',
-                        style: kCodeFontStyle.copyWith(
-                          fontSize: 10,
-                          color: theme.colorScheme.onSurfaceVariant
-                              .withAlpha(140),
-                        ),
+              Widget node = AutoScrollTag(
+                key: ValueKey('toc-$anchorIndex'),
+                index: anchorIndex,
+                controller: _scrollController,
+                child: widgets[idx],
+              );
+              // H2 左侧主题色竖条，强化层级区分（混合风格）
+              if (level == 2) {
+                node = Container(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 3,
                       ),
                     ),
-                ],
-              );
+                  ),
+                  padding: const EdgeInsets.only(left: 12),
+                  child: node,
+                );
+              }
+              widgets[idx] = node;
             }
             anchorIndex++;
           }
@@ -511,4 +569,68 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   Widget _broken(String url) => Text('[图片缺失: $url]');
+}
+
+/// H1：特大标题 + 加粗底线（混合风格，底线颜色随主题）。
+class _H1Config extends H1Config {
+  const _H1Config({required super.style, required this.dividerColor});
+
+  final Color dividerColor;
+
+  @override
+  HeadingDivider? get divider =>
+      HeadingDivider(color: dividerColor, height: 1.5, space: 8);
+
+  @override
+  EdgeInsets get padding => const EdgeInsets.only(top: 24, bottom: 8);
+}
+
+/// H2：去掉底线，层级感由左侧主题色竖条负责。
+class _H2Config extends H2Config {
+  const _H2Config({required super.style});
+
+  @override
+  HeadingDivider? get divider => null;
+
+  @override
+  EdgeInsets get padding => const EdgeInsets.only(top: 18, bottom: 6);
+}
+
+/// 引用块卡片化：浅背景 + 圆角 + 主题色左条（混合风格）。
+class _CardBlockquoteNode extends ElementNode {
+  _CardBlockquoteNode(
+    this.visitor, {
+    required this.backgroundColor,
+    required this.barColor,
+  });
+
+  final WidgetVisitor visitor;
+  final Color backgroundColor;
+  final Color barColor;
+
+  @override
+  InlineSpan build() {
+    return WidgetSpan(
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(color: barColor, width: 3),
+          ),
+        ),
+        child: ProxyRichText(
+          childrenSpan,
+          richTextBuilder: visitor.richTextBuilder,
+        ),
+      ),
+    );
+  }
+
+  @override
+  TextStyle? get style =>
+      TextStyle(color: parentStyle?.color).merge(parentStyle);
 }

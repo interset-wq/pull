@@ -288,29 +288,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           for (final toc in tocList) {
             final idx = toc.widgetIndex;
             if (idx >= 0 && idx < widgets.length) {
-              final level = _headingLevel(toc.node.headingConfig);
-              Widget node = AutoScrollTag(
+              widgets[idx] = AutoScrollTag(
                 key: ValueKey('toc-$anchorIndex'),
                 index: anchorIndex,
                 controller: _scrollController,
                 child: widgets[idx],
               );
-              // H2 左侧主题色竖条，强化层级区分（混合风格）
-              if (level == 2) {
-                node = Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: theme.colorScheme.primary,
-                        width: 3,
-                      ),
-                    ),
-                  ),
-                  padding: const EdgeInsets.only(left: 12),
-                  child: node,
-                );
-              }
-              widgets[idx] = node;
             }
             anchorIndex++;
           }
@@ -327,17 +310,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         children: children,
       ),
     );
-  }
-
-  /// 由 headingConfig 具体类型推断标题层级（h1~h6，未知返回 null）。
-  int? _headingLevel(HeadingConfig config) {
-    if (config is H1Config) return 1;
-    if (config is H2Config) return 2;
-    if (config is H3Config) return 3;
-    if (config is H4Config) return 4;
-    if (config is H5Config) return 5;
-    if (config is H6Config) return 6;
-    return null;
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。
@@ -585,12 +557,16 @@ class _H1Config extends H1Config {
   EdgeInsets get padding => const EdgeInsets.only(top: 24, bottom: 8);
 }
 
-/// H2：去掉底线，层级感由左侧主题色竖条负责。
+/// H2：细底线（比 H1 浅），GitHub 文档风层级。
 class _H2Config extends H2Config {
   const _H2Config({required super.style});
 
   @override
-  HeadingDivider? get divider => null;
+  HeadingDivider? get divider => HeadingDivider(
+        color: Colors.grey.withAlpha(70),
+        height: 1,
+        space: 4,
+      );
 
   @override
   EdgeInsets get padding => const EdgeInsets.only(top: 18, bottom: 6);

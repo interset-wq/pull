@@ -40,6 +40,16 @@ class MarkdownViewerPage extends StatefulWidget {
     r'\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)]+)\)',
   );
 
+  /// SVG 徽章类图片直接忽略：非常用位图格式、难以排版
+  /// （shields.io / contrib.rocks / star-history / .svg 文件）。
+  static final RegExp _ignoredImageRegExp = RegExp(
+    r'!\[[^\]]*\]\((?:[^)]*\.svg(?:\?[^)]*)?'
+    r'|https?://img\.shields\.io/[^)]*'
+    r'|https?://contrib\.rocks/[^)]*'
+    r'|https?://api\.star-history\.com/[^)]*)\)',
+    caseSensitive: false,
+  );
+
   /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
   /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
   static String normalizeHtmlImages(String md) {
@@ -60,7 +70,9 @@ class MarkdownViewerPage extends StatefulWidget {
         .replaceAll(RegExp(r'<source\b[^>]*/?>', caseSensitive: false), '')
         .replaceAll(RegExp(r'</?center[^>]*>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
-        .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n');
+        .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n')
+        // 徽章/SVG 图片在排版中无意义，直接忽略
+        .replaceAll(_ignoredImageRegExp, '');
   }
 
   /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。

@@ -20,31 +20,29 @@ void main() {
 
     test('自闭合 img 与单引号属性', () {
       const src = '<a href="https://x.com">\n'
-          '  <img src=\'https://contrib.rocks/image?repo=a/b\' />\n'
+          "  <img src='https://example.com/avatar.png' />\n"
           '</a>\n';
       final out = MarkdownViewerPage.normalizeHtmlImages(src);
       expect(out.contains('<'), isFalse, reason: '不应残留任何 HTML 标签: $out');
       expect(out.contains('/>'), isFalse, reason: '不应残留自闭合斜杠: $out');
-      expect(out.contains('![](https://contrib.rocks/image?repo=a/b)'), isTrue);
+      expect(out.contains('![](https://example.com/avatar.png)'), isTrue);
     });
 
-    test('徽章式链接图片展平', () {
+    test('徽章式链接图片直接忽略（不渲染 SVG 徽章）', () {
       const src = '[![Stars](https://img.shields.io/stars?style=social)]'
           '(https://github.com/a/b/stargazers)\n'
-          '![GitHub forks](https://img.shields.io/forks)\n';
+          '![GitHub forks](https://img.shields.io/forks)\n'
+          '<a href="https://x.com">\n'
+          "  <img src='https://contrib.rocks/image?repo=a/b' />\n"
+          '</a>\n';
       final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('shields.io'), isFalse);
+      expect(out.contains('contrib.rocks'), isFalse);
       expect(out.contains('[!['), isFalse);
-      expect(
-        out.contains('![Stars](https://img.shields.io/stars?style=social)'),
-        isTrue,
-      );
-      expect(
-        out.contains('![GitHub forks](https://img.shields.io/forks)'),
-        isTrue,
-      );
+      expect(out.contains('![]('), isFalse);
     });
 
-    test('picture/source 包裹（star-history 常见写法）', () {
+    test('picture/source 包裹（star-history 常见写法）直接忽略', () {
       const src = '''
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="dark.svg">
@@ -54,10 +52,14 @@ void main() {
       final out = MarkdownViewerPage.normalizeHtmlImages(src);
       expect(out.contains('<'), isFalse, reason: '不应残留任何 HTML 标签: $out');
       expect(out.contains('srcset'), isFalse);
-      expect(
-        out.contains('![](https://api.star-history.com/svg?repos=a/b&type=Date)'),
-        isTrue,
-      );
+      expect(out.contains('star-history.com'), isFalse);
+    });
+
+    test('本地 .svg 资源同样忽略，位图正常保留', () {
+      const src = '![dark](assets/dark.svg)\n![photo](figures/pic.png)\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('dark.svg'), isFalse);
+      expect(out.contains('![photo](figures/pic.png)'), isTrue);
     });
 
     test('空 img 标签两种写法直接移除', () {

@@ -134,15 +134,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     return MarkdownConfig(
       configs: [
-        _H1Config(
+        H1Config(
           style: theme.textTheme.headlineLarge!.copyWith(
             height: 1.35,
             fontWeight: FontWeight.w700,
             color: theme.colorScheme.onSurface,
           ),
-          dividerColor: theme.colorScheme.outlineVariant,
         ),
-        _H2Config(
+        H2Config(
           style: theme.textTheme.headlineSmall!.copyWith(
             height: 1.35,
             fontWeight: FontWeight.w700,
@@ -288,11 +287,39 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           for (final toc in tocList) {
             final idx = toc.widgetIndex;
             if (idx >= 0 && idx < widgets.length) {
-              widgets[idx] = AutoScrollTag(
-                key: ValueKey('toc-$anchorIndex'),
-                index: anchorIndex,
-                controller: _scrollController,
-                child: widgets[idx],
+              final level = _headingLevel(toc.node.headingConfig) ?? 6;
+              widgets[idx] = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 30,
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        top: level <= 2 ? 8 : 5,
+                      ),
+                      child: Text(
+                        'H$level',
+                        style: kCodeFontStyle.copyWith(
+                          fontSize: level <= 2 ? 13 : 11,
+                          fontWeight:
+                              level <= 2 ? FontWeight.w700 : FontWeight.w500,
+                          color: level <= 2
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant
+                                  .withAlpha(150),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: AutoScrollTag(
+                      key: ValueKey('toc-$anchorIndex'),
+                      index: anchorIndex,
+                      controller: _scrollController,
+                      child: widgets[idx],
+                    ),
+                  ),
+                ],
               );
             }
             anchorIndex++;
@@ -310,6 +337,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         children: children,
       ),
     );
+  }
+
+  /// 由 headingConfig 具体类型推断标题层级（h1~h6，未知返回 null）。
+  int? _headingLevel(HeadingConfig config) {
+    if (config is H1Config) return 1;
+    if (config is H2Config) return 2;
+    if (config is H3Config) return 3;
+    if (config is H4Config) return 4;
+    if (config is H5Config) return 5;
+    if (config is H6Config) return 6;
+    return null;
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。
@@ -541,35 +579,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   Widget _broken(String url) => Text('[图片缺失: $url]');
-}
-
-/// H1：特大标题 + 加粗底线（混合风格，底线颜色随主题）。
-class _H1Config extends H1Config {
-  const _H1Config({required super.style, required this.dividerColor});
-
-  final Color dividerColor;
-
-  @override
-  HeadingDivider? get divider =>
-      HeadingDivider(color: dividerColor, height: 1.5, space: 8);
-
-  @override
-  EdgeInsets get padding => const EdgeInsets.only(top: 24, bottom: 8);
-}
-
-/// H2：细底线（比 H1 浅），GitHub 文档风层级。
-class _H2Config extends H2Config {
-  const _H2Config({required super.style});
-
-  @override
-  HeadingDivider? get divider => HeadingDivider(
-        color: Colors.grey.withAlpha(70),
-        height: 1,
-        space: 4,
-      );
-
-  @override
-  EdgeInsets get padding => const EdgeInsets.only(top: 18, bottom: 6);
 }
 
 /// 引用块卡片化：浅背景 + 圆角 + 主题色左条（混合风格）。

@@ -6,6 +6,8 @@ import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
 
 import 'code_font.dart';
+import 'copy_button.dart';
+import 'h_scrollbar.dart';
 
 /// 代码文件只读查看页：语法高亮（对标 GitHub mobile 的代码浏览体验）。
 class CodeViewerPage extends StatefulWidget {
@@ -20,6 +22,13 @@ class CodeViewerPage extends StatefulWidget {
 
 class _CodeViewerPageState extends State<CodeViewerPage> {
   late Future<String> _content;
+  final _verticalController = ScrollController();
+
+  @override
+  void dispose() {
+    _verticalController.dispose();
+    super.dispose();
+  }
 
   /// 根据扩展名推断语言（映射到 highlight.js 的语言名）。
   static const _extLanguage = {
@@ -93,21 +102,87 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          return SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: HighlightView(
-                snapshot.data!,
-                language: _language,
-                theme: isDark ? atomOneDarkTheme : githubTheme,
-                padding: const EdgeInsets.all(16),
-                textStyle: kCodeFontStyle.copyWith(
-                  fontSize: 13,
-                  height: 1.5,
+          final content = snapshot.data!;
+          final lines = content.split('\n');
+          return Column(
+            children: [
+              // 文件信息栏：语言、行数、快捷复制
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                color: theme.colorScheme.surfaceContainerHighest.withAlpha(70),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.code,
+                      size: 16,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _language,
+                      style: kCodeFontStyle.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text('${lines.length} 行', style: theme.textTheme.bodySmall),
+                    const Spacer(),
+                    CopyButton(code: content),
+                  ],
                 ),
               ),
-            ),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 行号列：与代码共用同一垂直滚动控制器保持对齐
+                    SingleChildScrollView(
+                      controller: _verticalController,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 16, 6, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            for (var i = 0; i < lines.length; i++)
+                              Text(
+                                '${i + 1}',
+                                style: kCodeFontStyle.copyWith(
+                                  fontSize: 13,
+                                  height: 1.5,
+                                  color: theme.colorScheme.outline,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: _verticalController,
+                        child: HScrollbar(
+                          child: HighlightView(
+                            content,
+                            language: _language,
+                            theme: isDark ? atomOneDarkTheme : githubTheme,
+                            padding: const EdgeInsets.fromLTRB(4, 16, 16, 16),
+                            textStyle: kCodeFontStyle.copyWith(
+                              fontSize: 13,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           );
         },
       ),

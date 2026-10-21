@@ -41,6 +41,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _tags = const [];
   List<TocEntry> _toc = const [];
   List<String> _imageUrls = const [];
+  String? _rawSource;
+  bool _showRaw = false;
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
@@ -58,6 +60,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   Future<String> _load() async {
     var raw = await File(widget.note.absolutePath).readAsString();
+    _rawSource = raw;
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);
@@ -79,14 +82,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     caseSensitive: false,
   );
 
+  /// [![alt](img)](link) 徽章式链接图片展平为纯图片。
+  static final RegExp _badgeLinkImgRegExp = RegExp(
+    r'\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)]+)\)',
+  );
+
   /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
-  /// 同时归一化 <br> 与块级 div/p 包裹。
+  /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
   static String _normalizeHtmlImages(String md) {
     return md
         .replaceAllMapped(
           _htmlImgRegExp,
           (m) => '\n\n![](${m.group(1)!})\n\n',
         )
+        .replaceAllMapped(
+          _badgeLinkImgRegExp,
+          (m) => '![${m.group(1)!}](${m.group(2)!})',
+        )
+        .replaceAll(RegExp(r'</?a\b[^>]*>', caseSensitive: false), '')
         .replaceAll(RegExp(r'</?div[^>]*>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
         .replaceAll(RegExp(r'</?p[^>]*>', caseSensitive: false), '\n\n');
@@ -131,6 +144,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               onPressed: _showTocSheet,
               icon: const Icon(Icons.list_outlined),
             ),
+            IconButton(
+              tooltip: _showRaw ? '渲染视图' : 'Raw 模式',
+              onPressed: () => setState(() => _showRaw = !_showRaw),
+              icon: Icon(_showRaw ? Icons.article_outlined : Icons.data_object),
+            ),
             const Spacer(),
             IconButton(
               tooltip: '字号',
@@ -140,7 +158,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ],
         ),
       ),
-      body: FutureBuilder<String>(
+      body: _showRaw
+          ? _buildRawView(theme)
+          : FutureBuilder<String>(
         future: _content,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
@@ -519,6 +539,45 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Raw 模式：原始 Markdown 全文可选可复制（对标 GitHub mobile）。
+  Widget _buildRawView(ThemeData theme) {
+    final raw = _rawSource ?? '';
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Row(
+            children: [
+              Text(
+                'Raw',
+                style: kCodeFontStyle.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const Spacer(),
+              CopyButton(code: raw),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: SelectableText(
+              raw,
+              style: kCodeFontStyle.copyWith(
+                fontSize: 13,
+                height: 1.6,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

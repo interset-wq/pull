@@ -134,7 +134,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     return MarkdownConfig(
       configs: [
-        H1Config(
+        _H1Config(
           style: theme.textTheme.headlineLarge!.copyWith(
             fontSize: 30,
             height: 1.35,
@@ -142,7 +142,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             color: theme.colorScheme.onSurface,
           ),
         ),
-        H2Config(
+        _H2Config(
           style: theme.textTheme.headlineSmall!.copyWith(
             fontSize: 24,
             height: 1.35,
@@ -583,4 +583,19 @@ class _CardBlockquoteNode extends ElementNode {
   @override
   TextStyle? get style =>
       TextStyle(color: parentStyle?.color).merge(parentStyle);
+}
+
+/// H1/H2：取消包内默认底部分隔线，层级纯靠字号字重区分。
+class _H1Config extends H1Config {
+  const _H1Config({required super.style});
+
+  @override
+  HeadingDivider? get divider => null;
+}
+
+class _H2Config extends H2Config {
+  const _H2Config({required super.style});
+
+  @override
+  HeadingDivider? get divider => null;
 }

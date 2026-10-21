@@ -134,9 +134,34 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   ) {
     return MarkdownConfig(
       configs: [
-        H1Config(style: theme.textTheme.headlineMedium!.copyWith(height: 1.4)),
-        H2Config(style: theme.textTheme.headlineSmall!.copyWith(height: 1.4)),
-        H3Config(style: theme.textTheme.titleLarge!.copyWith(height: 1.4)),
+        H1Config(
+          style: theme.textTheme.headlineLarge!.copyWith(
+            height: 1.35,
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        H2Config(
+          style: theme.textTheme.headlineSmall!.copyWith(
+            height: 1.35,
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        H3Config(
+          style: theme.textTheme.titleLarge!.copyWith(
+            height: 1.4,
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        H4Config(
+          style: theme.textTheme.titleMedium!.copyWith(
+            height: 1.4,
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
         PConfig(
           textStyle: theme.textTheme.bodyLarge!.copyWith(
             fontSize: fontSize,
@@ -185,11 +210,30 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           for (final toc in tocList) {
             final idx = toc.widgetIndex;
             if (idx >= 0 && idx < widgets.length) {
-              widgets[idx] = AutoScrollTag(
-                key: ValueKey('toc-$anchorIndex'),
-                index: anchorIndex,
-                controller: _scrollController,
-                child: widgets[idx],
+              final level = _headingLevel(toc.node.headingConfig);
+              widgets[idx] = Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AutoScrollTag(
+                    key: ValueKey('toc-$anchorIndex'),
+                    index: anchorIndex,
+                    controller: _scrollController,
+                    child: widgets[idx],
+                  ),
+                  if (level != null)
+                    Positioned(
+                      top: 2,
+                      right: 0,
+                      child: Text(
+                        'H$level',
+                        style: kCodeFontStyle.copyWith(
+                          fontSize: 10,
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withAlpha(140),
+                        ),
+                      ),
+                    ),
+                ],
               );
             }
             anchorIndex++;
@@ -207,6 +251,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         children: children,
       ),
     );
+  }
+
+  /// 由 headingConfig 具体类型推断标题层级（h1~h6，未知返回 null）。
+  int? _headingLevel(HeadingConfig config) {
+    if (config is H1Config) return 1;
+    if (config is H2Config) return 2;
+    if (config is H3Config) return 3;
+    if (config is H4Config) return 4;
+    if (config is H5Config) return 5;
+    if (config is H6Config) return 6;
+    return null;
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。

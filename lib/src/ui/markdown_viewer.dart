@@ -169,6 +169,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         const ListConfig(),
+        LinkConfig(
+          style: theme.textTheme.bodyLarge!.copyWith(
+            fontSize: fontSize,
+            color: isDark
+                ? theme.colorScheme.tertiary
+                : const Color(0xff0969da),
+            decoration: TextDecoration.underline,
+            decorationColor: isDark
+                ? theme.colorScheme.tertiary.withAlpha(120)
+                : const Color(0xff0969da).withAlpha(80),
+          ),
+        ),
+        BlockquoteConfig(
+          sideColor: isDark
+              ? theme.colorScheme.outline
+              : const Color(0xffd0d7de),
+          textColor: theme.colorScheme.onSurfaceVariant,
+        ),
         CodeConfig(
           style: kCodeFontStyle.copyWith(
             backgroundColor: isDark
@@ -441,25 +459,55 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   /// 仓库内相对路径的图片解析为本地文件；网络图片原样加载。
+  /// 点击可全屏缩放查看。
   Widget _buildImage(String url) {
     final clean = url.trim();
+    final Widget image;
     if (clean.startsWith('http://') || clean.startsWith('https://')) {
-      return Image.network(clean);
+      image = Image.network(clean);
+    } else {
+      final file = File(
+        '${widget.repoRoot}${Platform.pathSeparator}'
+        '${clean.replaceAll('/', Platform.pathSeparator)}',
+      );
+      if (!file.existsSync()) return _broken(url);
+      image = Image.file(file);
     }
-    final file = File(
-      '${widget.repoRoot}${Platform.pathSeparator}'
-      '${clean.replaceAll('/', Platform.pathSeparator)}',
-    );
-    if (file.existsSync()) {
-      return Padding(
+    return GestureDetector(
+      onTap: () => _showImageFullscreen(image, url),
+      child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.file(file, errorBuilder: (_, _, _) => _broken(url)),
+          child: image,
         ),
-      );
-    }
-    return _broken(url);
+      ),
+    );
+  }
+
+  void _showImageFullscreen(Widget image, String url) {
+    Navigator.push(
+      context,
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black87,
+        pageBuilder: (_, _, _) => Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            title: Text(
+              url.split('/').last,
+              style: const TextStyle(fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          body: InteractiveViewer(
+            maxScale: 5,
+            child: Center(child: image),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _broken(String url) => Text('[图片缺失: $url]');

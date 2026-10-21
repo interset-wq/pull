@@ -8,6 +8,7 @@ import 'package:markdown_widget/markdown_widget.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../git/repo_meta.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/note_scanner.dart';
@@ -168,6 +169,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   Future<String> _load() async {
     var raw = await File(widget.note.absolutePath).readAsString();
     _rawSource = raw;
+    RepoMeta.touchLastOpened(widget.repoRoot, widget.note.relativePath);
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../git/repo_meta.dart';
 import '../git/sync_service.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
@@ -86,9 +87,12 @@ class _HomePageState extends State<HomePage> {
                             repo.path.split(Platform.pathSeparator).last;
                         final count =
                             NoteScanner().scan(repo.path).length;
+                        final meta = RepoMeta.read(repo.path);
                         return _RepoCard(
                           name: name,
                           noteCount: count,
+                          source: meta?.source,
+                          lastOpened: meta?.lastOpened,
                           onTap: () => _openRepo(repo),
                           onDelete: () => _confirmDelete(repo),
                         );
@@ -127,6 +131,7 @@ class _HomePageState extends State<HomePage> {
     if (ok != true) return;
     try {
       await _sync.deleteRepo(repo.path);
+      RepoMeta.remove(repo.path);
       await _loadRepos();
     } on Exception catch (e) {
       if (mounted) {
@@ -208,6 +213,12 @@ class _HomePageState extends State<HomePage> {
         repo: info,
         parentDir: await _reposRoot,
       );
+      final root = await _reposRoot;
+      RepoMeta.writeClone(
+        '${root.path}${Platform.pathSeparator}$name',
+        url: url,
+        branch: info.defaultBranch,
+      );
       await _loadRepos();
       closeBusy();
     } on TimeoutException {
@@ -277,6 +288,8 @@ class _RepoCard extends StatelessWidget {
     required this.noteCount,
     required this.onTap,
     required this.onDelete,
+    this.source,
+    this.lastOpened,
   });
 
   final String name;
@@ -284,9 +297,16 @@ class _RepoCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
+  /// 远端来源（host + /owner/repo），未记录时为 null。
+  final String? source;
+
+  /// 最近打开的文件（仓库相对路径），未记录时为 null。
+  final String? lastOpened;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final last = lastOpened;
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -310,9 +330,24 @@ class _RepoCard extends StatelessWidget {
                     Text(name,
                         style: theme.textTheme.titleMedium,
                         overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 4),
-                    Text('$noteCount 个文件',
-                        style: theme.textTheme.bodySmall),
+                    if (source != null && source!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(source!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ],
+                    const SizedBox(height: 2),
+                    Text(
+                      last == null ? '$noteCount 个文件' : '最近：$last',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -511,6 +546,7 @@ class _RepoPageState extends State<RepoPage> {
   }
 
   void _openFile(NoteFile note) {
+    RepoMeta.touchLastOpened(widget.repoDir.path, note.relativePath);
     if (note.isMarkdown) {
       Navigator.push(
         context,

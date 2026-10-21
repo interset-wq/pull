@@ -90,6 +90,13 @@ class GitSyncService {
     if (res.statusCode != 200 || res.bodyBytes.isEmpty) {
       throw SyncException('归档下载失败 (${res.statusCode}): $archiveUrl');
     }
+    // 部分站点（如 GitCode）对程序化请求返回 HTML 反爬页而非 zip，
+    // 用 zip 魔数（PK\x03\x04）校验，不是真归档就抛错触发 git 克隆回退
+    if (res.bodyBytes.length < 4 ||
+        res.bodyBytes[0] != 0x50 ||
+        res.bodyBytes[1] != 0x4B) {
+      throw SyncException('归档不可用（站点返回非 zip 内容）: $archiveUrl');
+    }
     final marker = File('$targetPath${Platform.pathSeparator}$_markerName');
     if (clearExisting && targetPath.isNotEmpty) {
       final dir = Directory(targetPath);
@@ -131,7 +138,8 @@ class GitSyncService {
   }
 
   /// 解压 zip：自动剥离平台打包的单一根目录（如 repo-main/）。
-  static void _extractZip(Uint8List bytes, String targetPath) {
+  /// 返回写入的文件数，为 0 时视为无效归档抛错。
+  static int _extractZip(Uint8List bytes, String targetPath) {
     final archive = ZipDecoder().decodeBytes(bytes);
     String? root;
     for (final f in archive.files) {
@@ -143,6 +151,7 @@ class GitSyncService {
         root = '';
       }
     }
+    var count = 0;
     for (final f in archive.files) {
       if (!f.isFile) continue;
       final rel = root != null && root.isNotEmpty && f.name.startsWith(root)
@@ -155,7 +164,12 @@ class GitSyncService {
       );
       file.createSync(recursive: true);
       file.writeAsBytesSync(f.content as List<int>);
+      count++;
     }
+    if (count == 0) {
+      throw const SyncException('归档内容为空');
+    }
+    return count;
   }
 
   /// git2dart 全量克隆（归档不可用时的回退路径）。

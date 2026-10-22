@@ -1,6 +1,8 @@
 import 'dart:io';
 
-/// 扫描本地仓库中的笔记（Markdown/Notebook）与代码文件。
+export '../utils/natural_sort.dart';
+
+/// 扫描本地仓库中的笔记（Markdown/Notebook）、代码、图片与其他文本文件。
 class NoteScanner {
   static const mdExtensions = {'.md', '.markdown', '.ipynb'};
 
@@ -11,7 +13,25 @@ class NoteScanner {
     '.php', '.swift', '.m', '.sh', '.bash', '.zsh', '.json', '.yaml', '.yml',
     '.toml', '.xml', '.html', '.css', '.scss', '.sql', '.r', '.lua', '.pl',
     '.txt', '.gradle', '.properties', '.cfg', '.ini', '.cmake',
+    '.csv', '.tsv', '.log', '.env', '.mdx', '.diff', '.patch',
   };
+
+  /// 可直接预览的图片扩展名。
+  static const imageExtensions = {
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg',
+  };
+
+  /// 明确的二进制类型：不作为文本兜底展示。
+  static const binaryExtensions = {
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.o', '.a', '.lib',
+    '.zip', '.gz', '.tar', '.rar', '.7z', '.jar', '.apk', '.ipa',
+    '.pdf', '.ttf', '.otf', '.woff', '.woff2', '.eot', '.ico',
+    '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac', '.psd', '.class',
+  };
+
+  /// 未知类型的文本兜底大小上限：小文件按纯文本展示。
+  static const unknownTextMaxBytes = 1 << 20; // 1 MB
+
   static const skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
 
   /// 递归列出仓库下所有可查看文件（相对仓库根的路径），
@@ -35,8 +55,15 @@ class NoteScanner {
         final ext = name.contains('.')
             ? name.substring(name.lastIndexOf('.')).toLowerCase()
             : '';
-        if (!mdExtensions.contains(ext) && !codeExtensions.contains(ext)) {
-          continue;
+        // 图片/已知文本直接收录；未注册类型兜底为小体积纯文本
+        // （csv 等），保证任何目录都不会"解析不出文件"。
+        final known = mdExtensions.contains(ext) ||
+            codeExtensions.contains(ext) ||
+            imageExtensions.contains(ext);
+        if (!known) {
+          if (binaryExtensions.contains(ext)) continue;
+          final size = entity.lengthSync();
+          if (size > unknownTextMaxBytes) continue;
         }
         final stat = entity.statSync();
         out.add(
@@ -82,6 +109,8 @@ class NoteFile {
   }
 
   bool get isMarkdown => NoteScanner.mdExtensions.contains(extension);
+
+  bool get isImage => NoteScanner.imageExtensions.contains(extension);
 }
 
 /// 从 Markdown 文本头部解析 front-matter（--- 包裹的 key: value）。

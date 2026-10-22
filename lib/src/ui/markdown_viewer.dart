@@ -18,6 +18,7 @@ import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
+import 'home_page.dart';
 import 'image_gallery.dart';
 import 'repo_image.dart';
 
@@ -76,7 +77,42 @@ class MarkdownViewerPage extends StatefulWidget {
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
         .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n')
         // 徽章/SVG 图片在排版中无意义，直接忽略
-        .replaceAll(_ignoredImageRegExp, '');
+        .replaceAll(_ignoredImageRegExp, '')
+        // 行内样式标签转 Markdown 等价语法（保护代码围栏不转换）
+        .replaceAllMapped(_inlineHtmlFenceRegExp, (m) {
+      if (m.group(1) != null) return m.group(1)!; // 围栏内原样保留
+      return _convertInlineHtmlTags(m.group(2)!);
+    });
+  }
+
+  /// 按 fenced code block 分段：group(1)=围栏段，group(2)=普通段。
+  static final RegExp _inlineHtmlFenceRegExp =
+      RegExp(r'(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))|([\s\S]*?)');
+
+  /// 行内 HTML 标签转 Markdown：strong/b→加粗、em/i→斜体、
+  /// del/s/strike→删除线；u/mark/kbd/sub/sup/span 等无等价
+  /// 语法的剥壳保留文字，避免原文出现标签残渣。
+  static String _convertInlineHtmlTags(String md) {
+    return md
+        .replaceAllMapped(
+          RegExp(r'<(strong|b)>([\s\S]*?)</\1>', caseSensitive: false),
+          (m) => '**${m.group(2)!}**',
+        )
+        .replaceAllMapped(
+          RegExp(r'<(em|i)>([\s\S]*?)</\1>', caseSensitive: false),
+          (m) => '*${m.group(2)!}*',
+        )
+        .replaceAllMapped(
+          RegExp(r'<(del|s|strike)>([\s\S]*?)</\1>', caseSensitive: false),
+          (m) => '~~${m.group(2)!}~~',
+        )
+        .replaceAll(
+          RegExp(
+            r'</?(u|mark|kbd|sub|sup|small|span|font)\b[^>]*>',
+            caseSensitive: false,
+          ),
+          '',
+        );
   }
 
   /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。
@@ -129,8 +165,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             .substring(dirPart.length)
             .contains('/'))
         .toList()
-      ..sort((a, b) =>
-          a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
+      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
     _siblings = siblings;
     _siblingIndex = siblings.indexWhere((n) => n.relativePath == rel);
   }
@@ -238,8 +273,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             tooltip: '更多',
             onSelected: (v) {
               switch (v) {
-                case 'toc':
-                  _showTocSheet();
                 case 'raw':
                   setState(() => _showRaw = !_showRaw);
                 case 'font':
@@ -247,7 +280,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(value: 'toc', child: Text('目录')),
               PopupMenuItem(
                 value: 'raw',
                 child: Text(_showRaw ? '渲染视图' : 'Raw 模式'),
@@ -257,26 +289,33 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ],
       ),
-      floatingActionButton: _showJump
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.small(
-                  heroTag: 'jump-top',
-                  tooltip: '回到顶部',
-                  onPressed: _scrollToTop,
-                  child: const Icon(Icons.keyboard_arrow_up),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'jump-bottom',
-                  tooltip: '跳到文末',
-                  onPressed: _scrollToBottom,
-                  child: const Icon(Icons.keyboard_arrow_down),
-                ),
-              ],
-            )
-          : null,
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'toc',
+            tooltip: '目录',
+            onPressed: _showTocSheet,
+            child: const Icon(Icons.article_outlined),
+          ),
+          if (_showJump) ...[
+            const SizedBox(height: 8),
+            FloatingActionButton.small(
+              heroTag: 'jump-top',
+              tooltip: '回到顶部',
+              onPressed: _scrollToTop,
+              child: const Icon(Icons.keyboard_arrow_up),
+            ),
+            const SizedBox(height: 8),
+            FloatingActionButton.small(
+              heroTag: 'jump-bottom',
+              tooltip: '跳到文末',
+              onPressed: _scrollToBottom,
+              child: const Icon(Icons.keyboard_arrow_down),
+            ),
+          ],
+        ],
+      ),
       body: _showRaw
           ? _buildRawView(theme)
           : FutureBuilder<String>(
@@ -391,7 +430,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           textColor: theme.colorScheme.onSurfaceVariant,
         ),
         CodeConfig(
-          style: kCodeFontStyle.copyWith(
+          style: currentCodeFontStyle().copyWith(
             backgroundColor: isDark
                 ? theme.colorScheme.surfaceContainerHighest.withAlpha(204)
                 : const Color(0xCCeff1f3),
@@ -483,6 +522,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         const SizedBox(height: 16),
       ]);
     }
+    // 底部留白：防止浮动按钮（目录/回顶/回底）遮住末尾文字与翻页按钮
+    children.add(const SizedBox(height: 120));
     return Scrollbar(
       key: _viewportKey,
       controller: _scrollController,
@@ -603,7 +644,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   theme: highlightTheme,
                   padding: const EdgeInsets.only(
                       top: 28, left: 12, right: 12, bottom: 4),
-                  textStyle: kCodeFontStyle.copyWith(
+                  textStyle: currentCodeFontStyle().copyWith(
                     fontSize: 13,
                     height: 1.5,
                   ),
@@ -614,7 +655,19 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                     left: 12,
                     child: Text(
                       language,
-                      style: kCodeFontStyle.copyWith(
+                      style: currentCodeFontStyle().copyWith(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  Positioned(
+                    top: 4,
+                    left: 12,
+                    child: Text(
+                      'text',
+                      style: currentCodeFontStyle().copyWith(
                         fontSize: 11,
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -659,15 +712,61 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       return;
     }
     final decoded = Uri.decodeComponent(pathPart);
-    final file =
-        File('$_noteDir${Platform.pathSeparator}$decoded').absolute.path;
-    if (!file.startsWith(widget.repoRoot) || !File(file).existsSync()) {
+    final target = _resolveLocalPath(decoded);
+    if (target == null || !target.startsWith(widget.repoRoot)) {
       return;
     }
-    final stat = File(file).statSync();
+    if (Directory(target).existsSync()) {
+      // 目录链接：优先打开目录内 index.md / README.md，否则进目录浏览页
+      for (final entry in const ['index.md', 'README.md']) {
+        final f = File('$target${Platform.pathSeparator}$entry');
+        if (f.existsSync()) {
+          _openLocalFile(f.path);
+          return;
+        }
+      }
+      final sub =
+          target.substring(widget.repoRoot.length + 1).replaceAll('\\', '/');
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => RepoPage(
+            repoDir: Directory(widget.repoRoot),
+            subPath: sub,
+          ),
+        ),
+      );
+      return;
+    }
+    if (File(target).existsSync()) {
+      _openLocalFile(target);
+    }
+  }
+
+  /// 解析链接目标为仓库内绝对路径：
+  /// `note/`、`./note` 相对当前笔记目录；`/note` 相对仓库根；
+  /// 支持 `../` 回退与尾部 `/`（目录）。
+  String? _resolveLocalPath(String link) {
+    final base =
+        link.startsWith('/') ? widget.repoRoot : _noteDir;
+    final parts = base.split(Platform.pathSeparator).toList();
+    for (final seg in link.split('/')) {
+      if (seg.isEmpty || seg == '.') continue;
+      if (seg == '..') {
+        if (parts.length > 1) parts.removeLast();
+        continue;
+      }
+      parts.add(seg);
+    }
+    return parts.join(Platform.pathSeparator);
+  }
+
+  /// 打开仓库内文件：笔记进阅读页，其余进代码/图片查看器。
+  void _openLocalFile(String path) {
+    final stat = File(path).statSync();
     final note = NoteFile(
-      relativePath: file.substring(widget.repoRoot.length + 1),
-      absolutePath: file,
+      relativePath: path.substring(widget.repoRoot.length + 1),
+      absolutePath: path,
       modified: stat.modified,
       sizeBytes: stat.size,
     );
@@ -676,7 +775,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       MaterialPageRoute<void>(
         builder: (_) => note.isMarkdown
             ? MarkdownViewerPage(note: note, repoRoot: widget.repoRoot)
-            : CodeViewerPage(path: file, fileName: note.fileName),
+            : CodeViewerPage(path: path, fileName: note.fileName),
       ),
     );
   }
@@ -799,7 +898,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             children: [
               Text(
                 'Raw',
-                style: kCodeFontStyle.copyWith(
+                style: currentCodeFontStyle().copyWith(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: theme.colorScheme.primary,
@@ -819,7 +918,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               child: SelectableText(
                 raw,
-                style: kCodeFontStyle.copyWith(
+                style: currentCodeFontStyle().copyWith(
                   fontSize: 13,
                   height: 1.6,
                   color: theme.colorScheme.onSurface,

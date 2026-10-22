@@ -38,13 +38,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byType(FloatingActionButton), findsNothing,
-        reason: '顶部时不应显示浮动按钮');
+    expect(find.byType(FloatingActionButton), findsOneWidget,
+        reason: '顶部时应只显示目录 FAB');
 
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -800));
     await tester.pumpAndSettle();
 
-    expect(find.byType(FloatingActionButton), findsNWidgets(2),
-        reason: '滚动超过阈值后应显示回顶/回底两个按钮');
+    expect(find.byType(FloatingActionButton), findsNWidgets(3),
+        reason: '滚动超过阈值后应显示目录 + 回顶/回底共三个按钮');
   });
 }

@@ -76,5 +76,20 @@ void main() {
         ['figures/a.png', 'https://x.io/b.svg'],
       );
     });
+
+    test('行内样式标签 strong/em/code 保留', () {
+      const src = '<strong>粗</strong> 与 <em>斜</em> 与 <code>x=1</code>\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('<strong>粗</strong>'), isTrue, reason: out);
+      expect(out.contains('<em>斜</em>'), isTrue);
+      expect(out.contains('<code>x=1</code>'), isTrue);
+    });
+
+    test('div/span 等块级包装标签被剥离', () {
+      const src = '<div align="center">\n\n正文内容\n\n</div>\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('div'), isFalse, reason: out);
+      expect(out.contains('正文内容'), isTrue);
+    });
   });
 }

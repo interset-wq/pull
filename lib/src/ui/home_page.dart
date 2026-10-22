@@ -137,12 +137,9 @@ class _HomePageState extends State<HomePage> {
                         final repo = repos[i];
                         final name =
                             repo.path.split(Platform.pathSeparator).last;
-                        final count =
-                            NoteScanner().scan(repo.path).length;
                         final meta = RepoMeta.read(repo.path);
                         return _RepoCard(
                           name: name,
-                          noteCount: count,
                           source: meta?.source,
                           lastOpened: meta?.lastOpened,
                           onTap: () => _openRepo(repo),
@@ -337,7 +334,6 @@ class _EmptyState extends StatelessWidget {
 class _RepoCard extends StatelessWidget {
   const _RepoCard({
     required this.name,
-    required this.noteCount,
     required this.onTap,
     required this.onDelete,
     this.source,
@@ -345,7 +341,6 @@ class _RepoCard extends StatelessWidget {
   });
 
   final String name;
-  final int noteCount;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -391,15 +386,17 @@ class _RepoCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                     ],
-                    const SizedBox(height: 2),
-                    Text(
-                      last == null ? '$noteCount 个文件' : '最近：$last',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                    if (last != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '最近：$last',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -550,12 +547,6 @@ class _RepoPageState extends State<RepoPage> {
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium,
                             ),
-                            trailing: Text(
-                              '${_dirFileCount(name)} 个文件',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute<void>(
@@ -626,16 +617,6 @@ class _RepoPageState extends State<RepoPage> {
             n.fileName.toLowerCase().contains(_query) ||
             n.relativePath.toLowerCase().contains(_query))
         .toList();
-  }
-
-  /// 当前目录下某子文件夹内的文件数（含嵌套）。
-  int _dirFileCount(String dirName) {
-    final prefix = widget.subPath.isEmpty
-        ? '$dirName/'
-        : '${widget.subPath}/$dirName/';
-    return (_allNotes ?? const <NoteFile>[])
-        .where((n) => n.relativePath.startsWith(prefix))
-        .length;
   }
 
   void _openFile(NoteFile note) {

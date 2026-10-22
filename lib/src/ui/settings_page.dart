@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
+import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
 
-/// 设置页：克隆偏好（默认托管平台 + 默认用户名），
-/// 供克隆对话框用 `repo` / `owner/repo` 短输入自动拼接完整 URL。
+/// 应用发布页（GitCode Releases），供手动下载最新 APK 更新。
+const String kReleaseUrl = 'https://gitcode.com/interset-wq/reader/releases';
+
+/// 设置页：克隆偏好（默认托管平台 + 默认用户名）、
+/// 代码字体选择与应用更新入口。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({required this.prefs, super.key});
 
@@ -52,6 +57,47 @@ class SettingsPage extends StatelessWidget {
                     '克隆时只需输入仓库名，自动拼成 ${prefs.platform.webBase}/${prefs.defaultOwner.isEmpty ? '<用户名>' : prefs.defaultOwner}/<仓库>',
               ),
               onChanged: prefs.setDefaultOwner,
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text('代码字体', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: kCodeFontJetBrains,
+                  label: Text('JetBrains Mono'),
+                ),
+                ButtonSegment(
+                  value: kCodeFontConsolas,
+                  label: Text('Consolas'),
+                ),
+              ],
+              selected: {prefs.codeFont},
+              onSelectionChanged: (s) => prefs.setCodeFont(s.first),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Consolas 为 Windows（VS Code）系统字体；'
+            '移动端缺失时自动回退到内置的 JetBrains Mono',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text('应用', style: theme.textTheme.titleMedium),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.system_update_outlined),
+            title: const Text('检查更新'),
+            subtitle: const Text('前往 GitCode Releases 下载最新 APK'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => launchUrl(
+              Uri.parse(kReleaseUrl),
+              mode: LaunchMode.externalApplication,
             ),
           ),
         ],

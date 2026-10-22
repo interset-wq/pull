@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platforms/git_platform.dart';
+import '../ui/code_font.dart'
+    show kCodeFontChoices, kCodeFontJetBrains;
 
 /// 应用级用户偏好：主题模式（跟随系统/浅/暗，持久化 + 应用内即时切换）、
 /// 阅读字号（持久化）与克隆偏好（默认平台 + 默认用户名，
 /// 供克隆时用短输入 `repo` / `owner/repo` 自动拼接完整 URL）。
 class AppPrefs extends ChangeNotifier {
-  AppPrefs._(this._mode, this._platform, this._defaultOwner);
+  AppPrefs._(this._mode, this._platform, this._defaultOwner, this._codeFont);
 
   static const _modeKey = 'themeMode';
   static const _fontKey = 'fontIndex';
   static const _platformKey = 'gitPlatform';
   static const _ownerKey = 'defaultOwner';
+  static const _codeFontKey = 'codeFont';
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
@@ -22,6 +25,9 @@ class AppPrefs extends ChangeNotifier {
 
   String _defaultOwner;
   String get defaultOwner => _defaultOwner;
+
+  String _codeFont;
+  String get codeFont => _codeFont;
 
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
@@ -33,6 +39,7 @@ class AppPrefs extends ChangeNotifier {
     ThemeMode mode = ThemeMode.system;
     var platform = GitPlatform.gitcode;
     var owner = '';
+    var codeFont = kCodeFontJetBrains;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -46,10 +53,13 @@ class AppPrefs extends ChangeNotifier {
         orElse: () => GitPlatform.gitcode,
       );
       owner = sp.getString(_ownerKey) ?? '';
+      codeFont = kCodeFontChoices.contains(sp.getString(_codeFontKey))
+          ? sp.getString(_codeFontKey)!
+          : kCodeFontJetBrains;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
-    return _instance = AppPrefs._(mode, platform, owner);
+    return _instance = AppPrefs._(mode, platform, owner, codeFont);
   }
 
   Future<void> setMode(ThemeMode m) async {
@@ -72,6 +82,13 @@ class AppPrefs extends ChangeNotifier {
     _defaultOwner = value;
     notifyListeners();
     await _save(_ownerKey, value);
+  }
+
+  Future<void> setCodeFont(String font) async {
+    if (font == _codeFont) return;
+    _codeFont = font;
+    notifyListeners();
+    await _save(_codeFontKey, font);
   }
 
   Future<void> _save(String key, String value) async {

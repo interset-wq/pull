@@ -180,7 +180,10 @@ class _HomePageState extends State<HomePage> {
   void _openRepo(Directory repoDir) {
     Navigator.push(
       context,
-      MaterialPageRoute<void>(builder: (_) => RepoPage(repoDir: repoDir)),
+      MaterialPageRoute<void>(
+        builder: (_) => RepoPage(repoDir: repoDir),
+        settings: const RouteSettings(name: 'repo-root'),
+      ),
     );
   }
 
@@ -584,6 +587,17 @@ class _RepoPageState extends State<RepoPage> {
       appBar: AppBar(
         title: Text(title, style: theme.textTheme.titleLarge),
         actions: [
+          // 深层目录一键弹回仓库根，免去逐级返回
+          if (widget.subPath.isNotEmpty)
+            IconButton(
+              tooltip: '回到根目录',
+              icon: const Icon(Icons.home_outlined),
+              onPressed: () => Navigator.popUntil(
+                context,
+                (route) =>
+                    route.settings.name == 'repo-root' || route.isFirst,
+              ),
+            ),
           IconButton(
             onPressed: _pull,
             icon: const Icon(Icons.sync),

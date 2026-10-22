@@ -110,6 +110,31 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   final GlobalKey _viewportKey = GlobalKey();
   DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// 回顶/回底浮动按钮显隐（滚动超过一屏后出现）。
+  bool _showJump = false;
+
+  /// 同目录下的文章列表（供上一篇/下一篇切换），按文件名排序。
+  List<NoteFile> _siblings = const [];
+  int _siblingIndex = -1;
+
+  /// 计算同目录文章列表与当前位置（供 上一篇/下一篇）。
+  void _loadSiblings() {
+    final rel = widget.note.relativePath.replaceAll('\\', '/');
+    final dirPart = rel.contains('/') ? rel.substring(0, rel.lastIndexOf('/') + 1) : '';
+    final siblings = NoteScanner()
+        .scan(widget.repoRoot)
+        .where((n) => n.relativePath.replaceAll('\\', '/').startsWith(dirPart))
+        .where((n) => !n.relativePath
+            .replaceAll('\\', '/')
+            .substring(dirPart.length)
+            .contains('/'))
+        .toList()
+      ..sort((a, b) =>
+          a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
+    _siblings = siblings;
+    _siblingIndex = siblings.indexWhere((n) => n.relativePath == rel);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -132,6 +157,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
+    // 回顶/回底按钮：滚过一屏内容后出现
+    final show = _scrollController.offset > 400;
+    if (show != _showJump) {
+      setState(() => _showJump = show);
+    }
     // 章节定位节流：避免每次滚动帧都遍历标题
     final now = DateTime.now();
     if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
@@ -175,6 +205,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
     body = MarkdownViewerPage.normalizeHtmlImages(body);
     _toc = extractToc(body);
+    _loadSiblings();
     _headingKeys
       ..clear()
       ..addAll(List.generate(_toc.length, (_) => GlobalKey()));
@@ -226,6 +257,26 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ],
       ),
+      floatingActionButton: _showJump
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'jump-top',
+                  tooltip: '回到顶部',
+                  onPressed: _scrollToTop,
+                  child: const Icon(Icons.keyboard_arrow_up),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'jump-bottom',
+                  tooltip: '跳到文末',
+                  onPressed: _scrollToBottom,
+                  child: const Icon(Icons.keyboard_arrow_down),
+                ),
+              ],
+            )
+          : null,
       body: _showRaw
           ? _buildRawView(theme)
           : FutureBuilder<String>(
@@ -425,6 +476,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
+    if (_siblings.length > 1 && _siblingIndex >= 0) {
+      children.addAll([
+        const Divider(height: 40),
+        _PrevNextNav(
+          siblings: _siblings,
+          index: _siblingIndex,
+          onOpen: _openSibling,
+        ),
+        const SizedBox(height: 16),
+      ]);
+    }
     return Scrollbar(
       key: _viewportKey,
       controller: _scrollController,
@@ -442,6 +504,35 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// 同目录内切换文章：替换当前路由，保持返回栈不变。
+  void _openSibling(NoteFile note) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            MarkdownViewerPage(note: note, repoRoot: widget.repoRoot),
+      ),
+    );
+  }
+
+  /// 浮动按钮：回到文首 / 跳到文末。
+  void _scrollToTop() {
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
     );
   }
 
@@ -854,4 +945,50 @@ class _HeadingMarker extends StatefulWidget {
 class _HeadingMarkerState extends State<_HeadingMarker> {
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+/// 文末导航：同目录内切换上一篇/下一篇。
+class _PrevNextNav extends StatelessWidget {
+  const _PrevNextNav({
+    required this.siblings,
+    required this.index,
+    required this.onOpen,
+  });
+
+  final List<NoteFile> siblings;
+  final int index;
+  final ValueChanged<NoteFile> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final prev = index > 0 ? siblings[index - 1] : null;
+    final next = index < siblings.length - 1 ? siblings[index + 1] : null;
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: prev == null ? null : () => onOpen(prev),
+            icon: const Icon(Icons.chevron_left),
+            label: Text(
+              prev?.fileName ?? '已是第一篇',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: next == null ? null : () => onOpen(next),
+            icon: const Icon(Icons.chevron_right),
+            label: Text(
+              next?.fileName ?? '已是最后一篇',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

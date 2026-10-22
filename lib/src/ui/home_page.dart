@@ -12,6 +12,7 @@ import '../platforms/repo_info.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
 import 'markdown_viewer.dart';
+import 'settings_page.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
 /// 移动端优先：大卡片、下拉刷新、底部导航结构。
@@ -26,6 +27,7 @@ class _HomePageState extends State<HomePage> {
   final _sync = GitSyncService();
   List<Directory>? _repos;
   bool _cloning = false;
+  bool _updatingAll = false;
 
   Future<Directory> get _reposRoot async {
     final docs = await getApplicationDocumentsDirectory();
@@ -62,7 +64,29 @@ class _HomePageState extends State<HomePage> {
         centerTitle: false,
         title: Text('Reader', style: theme.textTheme.headlineMedium),
         actions: [
-          if (AppPrefs.instance case final prefs?)
+          IconButton(
+            tooltip: '全部更新',
+            icon: _updatingAll
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cloud_sync_outlined),
+            onPressed:
+                (_cloning || _updatingAll || _repos == null) ? null : _pullAll,
+          ),
+          if (AppPrefs.instance case final prefs?) ...[
+            IconButton(
+              tooltip: '设置',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => SettingsPage(prefs: prefs),
+                ),
+              ),
+            ),
             ListenableBuilder(
               listenable: prefs,
               builder: (context, _) {
@@ -111,6 +135,7 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             ),
+          ],
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -190,8 +215,58 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 顺序 pull 所有本地仓库，汇总结果提示。
+  Future<void> _pullAll() async {
+    final repos = _repos;
+    if (repos == null || repos.isEmpty) return;
+    setState(() => _updatingAll = true);
+    var updated = 0;
+    var failed = 0;
+    try {
+      final sync = GitSyncService();
+      for (final repo in repos) {
+        try {
+          final result = await sync.pull(repoDir: repo);
+          if (result != PullResult.upToDate) updated++;
+        } on Exception {
+          failed++;
+        }
+      }
+      await _loadRepos();
+    } finally {
+      if (mounted) {
+        setState(() => _updatingAll = false);
+        final msg = failed > 0
+            ? '更新完成：$updated 个有更新，$failed 个失败'
+            : updated > 0
+                ? '已更新 $updated 个仓库'
+                : '所有仓库均已是最新';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
+      }
+    }
+  }
+
+  /// 解析克隆输入：完整 URL 原样返回；
+  /// `owner/repo` / `repo` 按设置的默认平台与用户名拼接完整地址。
+  String? _resolveCloneUrl(String input, AppPrefs prefs) {
+    final v = input.trim();
+    if (v.isEmpty) return null;
+    if (v.startsWith('http://') || v.startsWith('https://')) return v;
+    final parts = v.split('/').where((e) => e.isNotEmpty).toList();
+    final owner = switch (parts.length) {
+      2 => parts[0],
+      1 => prefs.defaultOwner,
+      _ => null,
+    };
+    final repo = parts.last;
+    if (owner == null || owner.isEmpty || repo.isEmpty) return null;
+    return '${prefs.platform.webBase}/$owner/$repo.git';
+  }
+
   Future<void> _showCloneDialog() async {
     final urlCtrl = TextEditingController();
+    final prefs = AppPrefs.instance;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -202,10 +277,15 @@ class _HomePageState extends State<HomePage> {
             TextField(
               controller: urlCtrl,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '仓库地址',
-                hintText: 'https://…/notes.git',
-                border: OutlineInputBorder(),
+                hintText: 'notes · owner/notes · https://…',
+                helperText: prefs == null
+                    ? null
+                    : '仅输仓库名时按 ${prefs.platform.displayName} / '
+                        '${prefs.defaultOwner.isEmpty ? '<默认用户名>' : prefs.defaultOwner} 拼接'
+                        '（可在设置中修改）',
+                border: const OutlineInputBorder(),
               ),
             ),
           ],
@@ -223,10 +303,20 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (ok != true) return;
-
-    final url = urlCtrl.text.trim();
-    if (url.isEmpty) return;
     if (!mounted) return;
+
+    final url = prefs == null
+        ? urlCtrl.text.trim()
+        : _resolveCloneUrl(urlCtrl.text, prefs);
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('无法解析地址：可输入完整 URL、用户名/仓库名，'
+              '或在设置中先填写默认用户名'),
+        ),
+      );
+      return;
+    }
     final name = url.split('/').last.replaceAll('.git', '');
     final info = RepoInfo(
       platform: _guessPlatform(url),
@@ -522,7 +612,7 @@ class _RepoPageState extends State<RepoPage> {
           ),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: () async => _refresh(),
+              onRefresh: _pull,
               child: isEmpty
                   ? ListView(children: const [
                       SizedBox(height: 120),

@@ -1,16 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 应用级用户偏好：主题模式（跟随系统/浅/暗，持久化 + 应用内即时切换）
-/// 与阅读字号（持久化）。
+import '../platforms/git_platform.dart';
+
+/// 应用级用户偏好：主题模式（跟随系统/浅/暗，持久化 + 应用内即时切换）、
+/// 阅读字号（持久化）与克隆偏好（默认平台 + 默认用户名，
+/// 供克隆时用短输入 `repo` / `owner/repo` 自动拼接完整 URL）。
 class AppPrefs extends ChangeNotifier {
-  AppPrefs._(this._mode);
+  AppPrefs._(this._mode, this._platform, this._defaultOwner);
 
   static const _modeKey = 'themeMode';
   static const _fontKey = 'fontIndex';
+  static const _platformKey = 'gitPlatform';
+  static const _ownerKey = 'defaultOwner';
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
+
+  GitPlatform _platform;
+  GitPlatform get platform => _platform;
+
+  String _defaultOwner;
+  String get defaultOwner => _defaultOwner;
 
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
@@ -20,6 +31,8 @@ class AppPrefs extends ChangeNotifier {
   static Future<AppPrefs> load() async {
     if (_instance != null) return _instance!;
     ThemeMode mode = ThemeMode.system;
+    var platform = GitPlatform.gitcode;
+    var owner = '';
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -28,21 +41,46 @@ class AppPrefs extends ChangeNotifier {
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       };
+      platform = GitPlatform.values.firstWhere(
+        (p) => p.name == sp.getString(_platformKey),
+        orElse: () => GitPlatform.gitcode,
+      );
+      owner = sp.getString(_ownerKey) ?? '';
     } on Object {
-      // 保持默认（跟随系统）
+      // 保持默认（跟随系统 + GitCode）
     }
-    return _instance = AppPrefs._(mode);
+    return _instance = AppPrefs._(mode, platform, owner);
   }
 
   Future<void> setMode(ThemeMode m) async {
     if (m == _mode) return;
     _mode = m;
     notifyListeners();
+    await _save(_modeKey, m.name);
+  }
+
+  Future<void> setPlatform(GitPlatform p) async {
+    if (p == _platform) return;
+    _platform = p;
+    notifyListeners();
+    await _save(_platformKey, p.name);
+  }
+
+  Future<void> setDefaultOwner(String v) async {
+    final value = v.trim();
+    if (value == _defaultOwner) return;
+    _defaultOwner = value;
+    notifyListeners();
+    await _save(_ownerKey, value);
+  }
+
+  Future<void> _save(String key, String value) async {
     try {
-      final sp = await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
-      await sp.setString(_modeKey, m.name);
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setString(key, value);
     } on Object {
-      // 保存失败不影响本次会话的主题切换
+      // 保存失败不影响本次会话
     }
   }
 

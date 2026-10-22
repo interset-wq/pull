@@ -403,13 +403,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             color: theme.colorScheme.primary.withAlpha(25),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
           ),
-          headerStyle: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: theme.colorScheme.onSurface,
-          ),
-          bodyStyle: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurface,
-          ),
+          // 注意：不要设置 headerStyle——包内 TBodyNode 也读取 headerStyle
+          // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
+          // 不设置时包内默认即"表头加粗、正文正常"。
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,
             width: 1,

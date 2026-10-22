@@ -554,7 +554,7 @@ class _RepoPageState extends State<RepoPage> {
         .where((name) =>
             !name.startsWith('.') && !NoteScanner.skipDirs.contains(name))
         .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      ..sort(compareNatural);
   }
 
   /// 当前目录下的 Markdown 笔记。
@@ -566,8 +566,7 @@ class _RepoPageState extends State<RepoPage> {
             .substring(prefix.length)
             .contains('/'))
         .toList()
-      ..sort((a, b) =>
-          a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()));
+      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
   }
 
   @override

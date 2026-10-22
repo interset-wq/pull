@@ -124,7 +124,7 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                     const SizedBox(width: 6),
                     Text(
                       _language,
-                      style: kCodeFontStyle.copyWith(
+                      style: currentCodeFontStyle().copyWith(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: theme.colorScheme.primary,
@@ -138,48 +138,52 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                 ),
               ),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 行号列：与代码共用同一垂直滚动控制器保持对齐
-                    SingleChildScrollView(
-                      controller: _verticalController,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 16, 6, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            for (var i = 0; i < lines.length; i++)
-                              Text(
-                                '${i + 1}',
-                                style: kCodeFontStyle.copyWith(
-                                  fontSize: 13,
-                                  height: 1.5,
-                                  color: theme.colorScheme.outline,
+                // 行号列与代码同处一个垂直滚动视图：天然同步滚动，
+                // 不会出现两个 Scrollable 共享 controller 时行号不跟滚的问题
+                child: Scrollbar(
+                  controller: _verticalController,
+                  thumbVisibility: true,
+                  thickness: 4,
+                  radius: const Radius.circular(4),
+                  child: SingleChildScrollView(
+                    controller: _verticalController,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 16, 6, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              for (var i = 0; i < lines.length; i++)
+                                Text(
+                                  '${i + 1}',
+                                  style: currentCodeFontStyle().copyWith(
+                                    fontSize: 13,
+                                    height: 1.5,
+                                    color: theme.colorScheme.outline,
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: _verticalController,
-                        child: HScrollbar(
-                          child: HighlightView(
-                            content,
-                            language: _language,
-                            theme: isDark ? atomOneDarkTheme : githubTheme,
-                            padding: const EdgeInsets.fromLTRB(4, 16, 16, 16),
-                            textStyle: kCodeFontStyle.copyWith(
-                              fontSize: 13,
-                              height: 1.5,
+                        Expanded(
+                          child: HScrollbar(
+                            child: HighlightView(
+                              content,
+                              language: _language,
+                              theme: isDark ? atomOneDarkTheme : githubTheme,
+                              padding: const EdgeInsets.fromLTRB(4, 16, 16, 16),
+                              textStyle: currentCodeFontStyle().copyWith(
+                                fontSize: 13,
+                                height: 1.5,
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],

@@ -11,6 +11,7 @@ import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
+import 'image_gallery.dart';
 import 'markdown_viewer.dart';
 import 'settings_page.dart';
 
@@ -657,10 +658,14 @@ class _RepoPageState extends State<RepoPage> {
                             leading: Icon(
                               note.isMarkdown
                                   ? Icons.description_outlined
-                                  : Icons.code_outlined,
+                                  : note.isImage
+                                      ? Icons.image_outlined
+                                      : Icons.code_outlined,
                               color: note.isMarkdown
                                   ? theme.colorScheme.onSurfaceVariant
-                                  : theme.colorScheme.secondary,
+                                  : note.isImage
+                                      ? theme.colorScheme.tertiary
+                                      : theme.colorScheme.secondary,
                               size: 22,
                             ),
                             title: Text(
@@ -718,6 +723,16 @@ class _RepoPageState extends State<RepoPage> {
           builder: (_) => MarkdownViewerPage(
             note: note,
             repoRoot: widget.repoDir.path,
+          ),
+        ),
+      );
+    } else if (note.isImage) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => ImageGalleryPage(
+            sources: [note.absolutePath],
+            baseDir: widget.repoDir.path,
           ),
         ),
       );

@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 /// 超宽内容（代码块/表格）的水平滚动容器：带可见滚动条，
 /// 确保内容不截断、不强制换行。
 class HScrollbar extends StatefulWidget {
-  const HScrollbar({required this.child, super.key});
+  const HScrollbar({
+    required this.child,
+    super.key,
+    this.bottomPadding = 0,
+  });
 
   final Widget child;
+
+  /// 内容底部预留高度：滚动条贴容器底缘，且不遮挡最后一行文字。
+  final double bottomPadding;
 
   @override
   State<HScrollbar> createState() => _HScrollbarState();
@@ -32,7 +39,10 @@ class _HScrollbarState extends State<HScrollbar> {
           child: ConstrainedBox(
             // 块元素化：内容至少占满视口宽度，少内容的代码块不再缩成窄条
             constraints: BoxConstraints(minWidth: constraints.maxWidth),
-            child: widget.child,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: widget.bottomPadding),
+              child: widget.child,
+            ),
           ),
         ),
       ),

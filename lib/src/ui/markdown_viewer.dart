@@ -237,10 +237,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               final fontSize = _fontSizes[_fontIndex];
               final isDark = theme.brightness == Brightness.dark;
               final config = _markdownConfig(theme, isDark, fontSize);
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _renderBody(snapshot.data!, theme, config),
-              );
+              return _renderBody(snapshot.data!, theme, config);
             },
           ),
     );
@@ -269,7 +266,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             color: theme.colorScheme.onSurface,
           ),
         ),
-        H3Config(
+        _H3Config(
           style: theme.textTheme.titleLarge!.copyWith(
             fontSize: 20,
             height: 1.4,
@@ -367,7 +364,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             width: 1,
             borderRadius: BorderRadius.circular(6),
           ),
-          wrapper: (child) => HScrollbar(child: child),
+          wrapper: (child) => HScrollbar(bottomPadding: 6, child: child),
         ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),
@@ -437,9 +434,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       child: SingleChildScrollView(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: children,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
         ),
       ),
     );
@@ -505,14 +505,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           width: double.infinity,
           color: bg,
           child: HScrollbar(
+            bottomPadding: 6,
             child: Stack(
               children: [
                 HighlightView(
-                  code,
+                  // markdown 解析出的 content 带尾随换行/空行，
+                  // 不裁掉会渲染成大段底部空白
+                  code.trimRight(),
                   language: language,
                   theme: highlightTheme,
                   padding: const EdgeInsets.only(
-                      top: 28, left: 12, right: 12, bottom: 12),
+                      top: 28, left: 12, right: 12, bottom: 4),
                   textStyle: kCodeFontStyle.copyWith(
                     fontSize: 13,
                     height: 1.5,
@@ -815,7 +818,7 @@ class _CardBlockquoteNode extends ElementNode {
       TextStyle(color: parentStyle?.color).merge(parentStyle);
 }
 
-/// H1/H2：取消包内默认底部分隔线，层级纯靠字号字重区分。
+/// H1/H2/H3：取消包内默认底部分隔线，层级纯靠字号字重区分。
 class _H1Config extends H1Config {
   const _H1Config({required super.style});
 
@@ -825,6 +828,13 @@ class _H1Config extends H1Config {
 
 class _H2Config extends H2Config {
   const _H2Config({required super.style});
+
+  @override
+  HeadingDivider? get divider => null;
+}
+
+class _H3Config extends H3Config {
+  const _H3Config({required super.style});
 
   @override
   HeadingDivider? get divider => null;

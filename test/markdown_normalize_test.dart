@@ -77,11 +77,11 @@ void main() {
       );
     });
 
-    test('行内样式标签 strong/em/code 保留', () {
+    test('行内样式标签 strong/em 转 Markdown，code 保留', () {
       const src = '<strong>粗</strong> 与 <em>斜</em> 与 <code>x=1</code>\n';
       final out = MarkdownViewerPage.normalizeHtmlImages(src);
-      expect(out.contains('<strong>粗</strong>'), isTrue, reason: out);
-      expect(out.contains('<em>斜</em>'), isTrue);
+      expect(out.contains('**粗**'), isTrue, reason: out);
+      expect(out.contains('*斜*'), isTrue);
       expect(out.contains('<code>x=1</code>'), isTrue);
     });
 
@@ -90,6 +90,21 @@ void main() {
       final out = MarkdownViewerPage.normalizeHtmlImages(src);
       expect(out.contains('div'), isFalse, reason: out);
       expect(out.contains('正文内容'), isTrue);
+    });
+
+    test('h1-h6 块级标题转 # 语法', () {
+      const src = '<h1>大标题</h1>\n正文<h3>小标题</h3>\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('# 大标题'), isTrue, reason: out);
+      expect(out.contains('### 小标题'), isTrue);
+      expect(out.contains('<h1>'), isFalse);
+    });
+
+    test('代码围栏内 HTML 标签原样保留', () {
+      const src = '```\n<strong>raw</strong>\n<h2>keep</h2>\n```\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('<strong>raw</strong>'), isTrue, reason: out);
+      expect(out.contains('<h2>keep</h2>'), isTrue);
     });
   });
 }

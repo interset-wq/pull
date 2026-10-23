@@ -41,6 +41,24 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadRepos();
+    _silentPullAll();
+  }
+
+  /// 启动时后台静默更新所有仓库：不转圈、不弹提示，完成后仅刷新列表。
+  Future<void> _silentPullAll() async {
+    // 等首轮仓库列表就绪再更新，避免与克隆/手动更新并发
+    await _loadRepos();
+    final repos = _repos;
+    if (repos == null || repos.isEmpty) return;
+    final sync = GitSyncService();
+    for (final repo in repos) {
+      try {
+        await sync.pull(repoDir: repo);
+      } on Exception {
+        // 静默失败：离线时保持本地内容可用
+      }
+    }
+    await _loadRepos();
   }
 
   Future<void> _loadRepos() async {
@@ -157,10 +175,30 @@ class _HomePageState extends State<HomePage> {
                   ? _EmptyState(onAdd: _showCloneDialog)
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                      itemCount: repos.length,
+                      itemCount: repos.length + 1,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
-                        final repo = repos[i];
+                        if (i == 0) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildFileStrip(
+                                repos,
+                                title: '⭐ 收藏',
+                                files: _collectStarred(repos),
+                              ),
+                              if (_collectStarred(repos).isNotEmpty &&
+                                  _collectRecents(repos).isNotEmpty)
+                                const SizedBox(height: 12),
+                              _buildFileStrip(
+                                repos,
+                                title: '最近阅读',
+                                files: _collectRecents(repos),
+                              ),
+                            ],
+                          );
+                        }
+                        final repo = repos[i - 1];
                         final name =
                             repo.path.split(Platform.pathSeparator).last;
                         final meta = RepoMeta.read(repo.path);
@@ -174,6 +212,128 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
             ),
+    );
+  }
+
+  /// 首页横滑文件条（收藏 / 最近阅读）。
+  Widget _buildFileStrip(
+    List<Directory> repos, {
+    required String title,
+    required List<(Directory, String)> files,
+  }) {
+    if (files.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 92,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: files.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final (repo, relPath) = files[i];
+              final repoName =
+                  repo.path.split(Platform.pathSeparator).last;
+              final fileName = relPath.split('/').last;
+              return Card(
+                elevation: 0,
+                margin: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _openRecentFile(repo, relPath),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: SizedBox(
+                      width: 150,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$repoName · ${relPath.split('/').reversed.skip(1).firstOrNull ?? ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 跨仓库聚合收藏文章（每仓库按收藏先后）。
+  List<(Directory, String)> _collectStarred(List<Directory> repos) {
+    final out = <(Directory, String)>[];
+    for (final repo in repos) {
+      for (final rel in RepoMeta.starredFiles(repo.path)) {
+        out.add((repo, rel));
+      }
+    }
+    return out;
+  }
+
+  /// 跨仓库聚合最近阅读（全局新→旧）。
+  List<(Directory, String)> _collectRecents(List<Directory> repos) {
+    if (repos.isEmpty) return const [];
+    final root = Directory(repos.first.parent.path);
+    final byName = {
+      for (final d in repos)
+        d.path.split(Platform.pathSeparator).last: d,
+    };
+    return RepoMeta.readRecents(root.path)
+        .map((e) => byName[e.$1] == null ? null : (byName[e.$1]!, e.$2))
+        .whereType<(Directory, String)>()
+        .toList();
+  }
+
+  /// 打开最近阅读的文章（仅 Markdown；文件已删除时忽略）。
+  void _openRecentFile(Directory repo, String relPath) {
+    final file = File(
+      '${repo.path}${Platform.pathSeparator}'
+      '${relPath.replaceAll('/', Platform.pathSeparator)}',
+    );
+    if (!file.existsSync()) return;
+    final stat = file.statSync();
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => MarkdownViewerPage(
+          note: NoteFile(
+            relativePath: relPath,
+            absolutePath: file.path,
+            modified: stat.modified,
+            sizeBytes: stat.size,
+          ),
+          repoRoot: repo.path,
+        ),
+      ),
     );
   }
 

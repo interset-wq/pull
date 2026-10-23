@@ -13,8 +13,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('jump buttons appear after scrolling past threshold',
-      (tester) async {
+  testWidgets('jump buttons are always visible', (tester) async {
     final repo = Directory.systemTemp.createTempSync('reader-jump-repo');
     final body = List.generate(60, (i) => '段落 $i：一些足够长的正文内容。').join('\n\n');
     final file = File('${repo.path}${Platform.pathSeparator}long.md')
@@ -38,13 +37,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byType(FloatingActionButton), findsOneWidget,
-        reason: '顶部时应只显示目录 FAB');
+    expect(find.byType(FloatingActionButton), findsNWidgets(3),
+        reason: '目录 + 回顶/回底三个按钮应始终显示');
 
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -800));
     await tester.pumpAndSettle();
 
     expect(find.byType(FloatingActionButton), findsNWidgets(3),
-        reason: '滚动超过阈值后应显示目录 + 回顶/回底共三个按钮');
+        reason: '滚动后按钮仍然显示');
   });
 }

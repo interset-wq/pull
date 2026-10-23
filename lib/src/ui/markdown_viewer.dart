@@ -168,9 +168,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   final GlobalKey _viewportKey = GlobalKey();
   DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// 回顶/回底浮动按钮显隐（滚动超过一屏后出现）。
-  bool _showJump = false;
-
   /// 同目录下的文章列表（供上一篇/下一篇切换），按文件名排序。
   List<NoteFile> _siblings = const [];
   int _siblingIndex = -1;
@@ -225,11 +222,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    // 回顶/回底按钮：滚过一屏内容后出现
-    final show = _scrollController.offset > 400;
-    if (show != _showJump) {
-      setState(() => _showJump = show);
-    }
     // 章节定位节流：避免每次滚动帧都遍历标题
     final now = DateTime.now();
     if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
@@ -367,28 +359,29 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          FloatingActionButton.small(
-            heroTag: 'toc',
-            tooltip: '目录',
-            onPressed: _showTocSheet,
-            child: const Icon(Icons.article_outlined),
-          ),
-          if (_showJump) ...[
-            const SizedBox(height: 8),
+          // raw 模式下没有渲染锚点，不提供目录
+          if (!_showRaw) ...[
             FloatingActionButton.small(
-              heroTag: 'jump-top',
-              tooltip: '回到顶部',
-              onPressed: _scrollToTop,
-              child: const Icon(Icons.keyboard_arrow_up),
+              heroTag: 'toc',
+              tooltip: '目录',
+              onPressed: _showTocSheet,
+              child: const Icon(Icons.article_outlined),
             ),
             const SizedBox(height: 8),
-            FloatingActionButton.small(
-              heroTag: 'jump-bottom',
-              tooltip: '跳到文末',
-              onPressed: _scrollToBottom,
-              child: const Icon(Icons.keyboard_arrow_down),
-            ),
           ],
+          FloatingActionButton.small(
+            heroTag: 'jump-top',
+            tooltip: '回到顶部',
+            onPressed: _scrollToTop,
+            child: const Icon(Icons.keyboard_arrow_up),
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton.small(
+            heroTag: 'jump-bottom',
+            tooltip: '跳到文末',
+            onPressed: _scrollToBottom,
+            child: const Icon(Icons.keyboard_arrow_down),
+          ),
         ],
       ),
       body: _showRaw
@@ -1189,7 +1182,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             thumbVisibility: true,
             thickness: 4,
             radius: const Radius.circular(4),
+            controller: _scrollController,
             child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               child: SelectableText(
                 raw,

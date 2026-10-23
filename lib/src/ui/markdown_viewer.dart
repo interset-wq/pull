@@ -317,10 +317,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           _title ?? widget.note.fileName,
           overflow: TextOverflow.ellipsis,
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(32),
-          child: _buildBreadcrumb(theme),
-        ),
         actions: [
           IconButton(
             tooltip: _starred ? '取消收藏' : '收藏',
@@ -413,23 +409,78 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// 面包屑行：仓库名 / 目录1 / 目录2 …（当前文章文件名不算层级）。
-  /// 收藏/最近阅读直接进入时栈里没有目录页，点击面包屑
-  /// 先尝试弹出返回栈中最近的仓库页，否则新建一个 RepoPage 推入。
+  /// 文首面包屑：文件夹图标 + 仓库 / 目录路径，与正文区分。
+  /// 点击回到仓库目录页；根目录文章（无目录层级）不显示。
   Widget _buildBreadcrumb(ThemeData theme) {
     final repoName =
         widget.repoRoot.split(Platform.pathSeparator).last;
-    final segments = widget.note.relativePath
+    final dirSegments = widget.note.relativePath
         .replaceAll('\\', '/')
         .split('/')
       ..removeLast()
       ..removeWhere((s) => s.isEmpty);
+    if (dirSegments.isEmpty) return const SizedBox.shrink();
     final style = theme.textTheme.bodySmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () {
+        var foundRepoRoute = false;
+        Navigator.of(context).popUntil((route) {
+          if (route.settings.name == 'repo-root') {
+            foundRepoRoute = true;
+            return true;
+          }
+          return route.isFirst;
+        });
+        if (!foundRepoRoute) {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  RepoPage(repoDir: Directory(widget.repoRoot)),
+              settings: const RouteSettings(name: 'repo-root'),
+            ),
+          );
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.folder_outlined,
+              size: 14,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '$repoName / ${dirSegments.join(' / ')}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 文末导航：回到上级目录 / 回到仓库首页，替代纯留白。
+  /// 收藏/最近阅读直达时栈里没有目录页，点击会先退栈再补推仓库页。
+  Widget _buildEndNav(ThemeData theme) {
+    final repoName =
+        widget.repoRoot.split(Platform.pathSeparator).last;
+    final dirSegments = widget.note.relativePath
+        .replaceAll('\\', '/')
+        .split('/')
+      ..removeLast()
+      ..removeWhere((s) => s.isEmpty);
+
     void backToRepo() {
-      // 收藏/最近阅读直达时栈里没有仓库页，popUntil 会一路退到首页；
-      // 此时用 pushedRoute 标记：先退栈，再补一个仓库根目录页。
       var foundRepoRoute = false;
       Navigator.of(context).popUntil((route) {
         if (route.settings.name == 'repo-root') {
@@ -448,44 +499,32 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       }
     }
 
-    return SizedBox(
-      height: 32,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          reverse: true,
-          child: Row(
-            children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(4),
-                onTap: backToRepo,
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-                  child: Text(repoName, style: style),
-                ),
-              ),
-              for (var i = 0; i < segments.length; i++) ...[
-                Text(' / ', style: style),
-                InkWell(
-                  borderRadius: BorderRadius.circular(4),
-                  onTap: backToRepo,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 6,
-                    ),
-                    child: Text(segments.sublist(0, i + 1).join('/'),
-                        style: style),
-                  ),
-                ),
-              ],
-            ],
+    Widget button(IconData icon, String label, VoidCallback onTap) =>
+        OutlinedButton.icon(
+          onPressed: onTap,
+          icon: Icon(icon, size: 18),
+          label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            foregroundColor: theme.colorScheme.onSurfaceVariant,
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
+        );
+
+    return Row(
+      children: [
+        Expanded(
+          child: button(
+            Icons.arrow_upward,
+            dirSegments.isEmpty ? '目录' : dirSegments.last,
+            backToRepo,
           ),
         ),
-      ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: button(Icons.home_outlined, repoName, backToRepo),
+        ),
+      ],
     );
   }
 
@@ -673,7 +712,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         ),
       ],
     );
-    final children = <Widget>[];
+    final children = <Widget>[
+      _buildBreadcrumb(theme),
+      const SizedBox(height: 4),
+    ];
     var anchorIndex = 0;
     for (final segment in splitGfmAlerts(content)) {
       switch (segment) {
@@ -710,8 +752,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
-    // 底部留白：防止常驻翻页 footer 与浮动按钮遮住末尾文字
-    children.add(const SizedBox(height: 150));
+    // 文末导航：回到上级目录 / 仓库首页，替代纯留白
+    children
+      ..add(const Divider(height: 32))
+      ..add(_buildEndNav(theme))
+      ..add(const SizedBox(height: 90));
     return Scrollbar(
       key: _viewportKey,
       controller: _scrollController,

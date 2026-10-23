@@ -1194,7 +1194,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               child: SelectableText(
                 raw,
                 style: currentCodeFontStyle().copyWith(
-                  fontSize: 13,
+                  // 跟随字号 FAB，与 markdown 视图共用同一档位
+                  fontSize: _fontSizes[_fontIndex],
                   height: 1.6,
                   color: theme.colorScheme.onSurface,
                 ),

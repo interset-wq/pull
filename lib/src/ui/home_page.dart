@@ -186,6 +186,7 @@ class _HomePageState extends State<HomePage> {
                                 repos,
                                 title: '⭐ 收藏',
                                 files: _collectStarred(repos),
+                                starred: true,
                               ),
                               if (_collectStarred(repos).isNotEmpty &&
                                   _collectRecents(repos).isNotEmpty)
@@ -194,6 +195,7 @@ class _HomePageState extends State<HomePage> {
                                 repos,
                                 title: '最近阅读',
                                 files: _collectRecents(repos),
+                                starred: false,
                               ),
                             ],
                           );
@@ -220,16 +222,20 @@ class _HomePageState extends State<HomePage> {
     List<Directory> repos, {
     required String title,
     required List<(Directory, String)> files,
+    required bool starred,
   }) {
     if (files.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
+    final accent = starred
+        ? const Color(0xFFF5B301)
+        : theme.colorScheme.primary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(title, style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         SizedBox(
-          height: 92,
+          height: 76,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: files.length,
@@ -239,44 +245,60 @@ class _HomePageState extends State<HomePage> {
               final repoName =
                   repo.path.split(Platform.pathSeparator).last;
               final fileName = relPath.split('/').last;
-              return Card(
-                elevation: 0,
-                margin: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
+              final parentDir = relPath.split('/')
+                ..removeLast()
+                ..removeWhere((s) => s.isEmpty);
+              final subtitle = parentDir.isEmpty
+                  ? repoName
+                  : '$repoName · ${parentDir.last}';
+              return Material(
+                color: theme.colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => _openRecentFile(repo, relPath),
-                  child: Padding(
+                  child: Container(
+                    width: 190,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 10,
+                      vertical: 8,
                     ),
-                    child: SizedBox(
-                      width: 150,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            fileName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium,
+                    child: Row(
+                      children: [
+                        Icon(
+                          starred
+                              ? Icons.star_rounded
+                              : Icons.history_rounded,
+                          size: 22,
+                          color: accent,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fileName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w500),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color:
+                                      theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '$repoName · ${relPath.split('/').reversed.skip(1).firstOrNull ?? ''}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -858,15 +880,6 @@ class _RepoPageState extends State<RepoPage> {
                                     ),
                                   )
                                 : null,
-                            trailing: searching
-                                ? null
-                                : Text(
-                                    _fmtTime(note.modified),
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                                  ),
                             onTap: () => _openFile(note),
                           ),
                       ],
@@ -920,15 +933,6 @@ class _RepoPageState extends State<RepoPage> {
         ),
       );
     }
-  }
-
-  String _fmtTime(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return '刚刚';
-    if (d.inHours < 1) return '${d.inMinutes} 分钟前';
-    if (d.inDays < 1) return '${d.inHours} 小时前';
-    if (d.inDays < 30) return '${d.inDays} 天前';
-    return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
   }
 
   Future<void> _pull() async {

@@ -521,21 +521,35 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         dirSegments.isEmpty ? '' : dirSegments.join('/');
 
     Widget button(IconData icon, String label, VoidCallback onTap) =>
-        OutlinedButton.icon(
+        OutlinedButton(
           onPressed: onTap,
-          icon: Icon(icon, size: 18),
-          label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             foregroundColor: theme.colorScheme.onSurfaceVariant,
             side: BorderSide(color: theme.colorScheme.outlineVariant),
           ),
+          // 自绘内容并 center：.icon 构造在拉伸宽度时会靠左排布
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         );
 
+    // 外层 _renderBody 的 Column（CrossAxisAlignment.start）给有界宽度，
+    // 这里 Center + 3/5 比例才能真正居中限宽（无界宽度下 Center 会收缩）。
     return Center(
-      widthFactor: 1,
       child: FractionallySizedBox(
-        widthFactor: 0.67,
+        widthFactor: 0.6,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

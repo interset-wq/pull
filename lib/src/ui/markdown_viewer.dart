@@ -409,8 +409,46 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
+  /// 跳到仓库内 `subPath` 对应的目录页（'' = 仓库根）。
+  /// 面包屑与文末导航按钮共用。
+  /// 收藏/最近阅读直达时栈里没有目录页：先退栈到仓库根（没有则在
+  /// 首页之上补推一个），再把途中各级目录页依次推入，保证返回栈完整。
+  void _openRepoDir(String subPath) {
+    var foundRepoRoute = false;
+    Navigator.of(context).popUntil((route) {
+      if (route.settings.name == 'repo-root') {
+        foundRepoRoute = true;
+        return true;
+      }
+      return route.isFirst;
+    });
+    if (!foundRepoRoute) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RepoPage(repoDir: Directory(widget.repoRoot)),
+          settings: const RouteSettings(name: 'repo-root'),
+        ),
+      );
+    }
+    // 逐级推入从仓库根到目标目录之间的路径（subPath 的每一段）
+    final target =
+        subPath.isEmpty ? const <String>[] : subPath.split('/');
+    for (var depth = 1; depth <= target.length; depth++) {
+      final path = target.sublist(0, depth).join('/');
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RepoPage(
+            repoDir: Directory(widget.repoRoot),
+            subPath: path,
+          ),
+        ),
+      );
+    }
+  }
+
   /// 文首面包屑：文件夹图标 + 仓库 / 目录路径，与正文区分。
-  /// 点击回到仓库目录页；根目录文章（无目录层级）不显示。
+  /// 仓库与每一级目录都是独立点击目标，跳到各自的目录页；
+  /// 根目录文章（无目录层级）不显示。
   Widget _buildBreadcrumb(ThemeData theme) {
     final repoName =
         widget.repoRoot.split(Platform.pathSeparator).last;
@@ -423,54 +461,54 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     final style = theme.textTheme.bodySmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: () {
-        var foundRepoRoute = false;
-        Navigator.of(context).popUntil((route) {
-          if (route.settings.name == 'repo-root') {
-            foundRepoRoute = true;
-            return true;
-          }
-          return route.isFirst;
-        });
-        if (!foundRepoRoute) {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) =>
-                  RepoPage(repoDir: Directory(widget.repoRoot)),
-              settings: const RouteSettings(name: 'repo-root'),
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.folder_outlined,
+            size: 14,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 4),
+          // 仓库根
+          Flexible(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => _openRepoDir(''),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                child: Text(repoName, style: style),
+              ),
             ),
-          );
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.folder_outlined,
-              size: 14,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 4),
+          ),
+          for (var i = 0; i < dirSegments.length; i++) ...[
+            Text(' / ', style: style),
             Flexible(
-              child: Text(
-                '$repoName / ${dirSegments.join(' / ')}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: style,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(4),
+                onTap: () =>
+                    _openRepoDir(dirSegments.sublist(0, i + 1).join('/')),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 4,
+                  ),
+                  child: Text(dirSegments[i], style: style),
+                ),
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
 
   /// 文末导航：回到上级目录 / 回到仓库首页，替代纯留白。
-  /// 收藏/最近阅读直达时栈里没有目录页，点击会先退栈再补推仓库页。
+  /// 上级目录跳到父目录页，仓库首页跳到仓库根；共用 _openRepoDir。
   Widget _buildEndNav(ThemeData theme) {
     final repoName =
         widget.repoRoot.split(Platform.pathSeparator).last;
@@ -479,25 +517,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         .split('/')
       ..removeLast()
       ..removeWhere((s) => s.isEmpty);
-
-    void backToRepo() {
-      var foundRepoRoute = false;
-      Navigator.of(context).popUntil((route) {
-        if (route.settings.name == 'repo-root') {
-          foundRepoRoute = true;
-          return true;
-        }
-        return route.isFirst;
-      });
-      if (!foundRepoRoute) {
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RepoPage(repoDir: Directory(widget.repoRoot)),
-            settings: const RouteSettings(name: 'repo-root'),
-          ),
-        );
-      }
-    }
+    final parentPath =
+        dirSegments.isEmpty ? '' : dirSegments.join('/');
 
     Widget button(IconData icon, String label, VoidCallback onTap) =>
         OutlinedButton.icon(
@@ -511,17 +532,27 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        button(
-          Icons.arrow_upward,
-          dirSegments.isEmpty ? '目录' : dirSegments.last,
-          backToRepo,
+    return Center(
+      widthFactor: 1,
+      child: FractionallySizedBox(
+        widthFactor: 0.67,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            button(
+              Icons.arrow_upward,
+              dirSegments.isEmpty ? '目录' : dirSegments.last,
+              () => _openRepoDir(parentPath),
+            ),
+            const SizedBox(height: 8),
+            button(
+              Icons.home_outlined,
+              repoName,
+              () => _openRepoDir(''),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        button(Icons.home_outlined, repoName, backToRepo),
-      ],
+      ),
     );
   }
 

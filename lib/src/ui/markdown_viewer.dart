@@ -511,19 +511,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         );
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: button(
-            Icons.arrow_upward,
-            dirSegments.isEmpty ? '目录' : dirSegments.last,
-            backToRepo,
-          ),
+        button(
+          Icons.arrow_upward,
+          dirSegments.isEmpty ? '目录' : dirSegments.last,
+          backToRepo,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: button(Icons.home_outlined, repoName, backToRepo),
-        ),
+        const SizedBox(height: 8),
+        button(Icons.home_outlined, repoName, backToRepo),
       ],
     );
   }

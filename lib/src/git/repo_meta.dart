@@ -11,6 +11,12 @@ class RepoMeta {
   final String? branch;
   final String? lastOpened;
 
+  /// 一条最近阅读记录（全局）。
+  const RepoMeta.recent({required this.lastOpened, this.url, this.branch});
+
+  /// 进度/收藏/历史条目数量上限，防止 meta 文件无限膨胀。
+  static const _maxEntries = 50;
+
   static File _file(String repoRoot) {
     final name = repoRoot.split(Platform.pathSeparator).last;
     final reposRoot = Directory(repoRoot).parent.path;
@@ -82,6 +88,116 @@ class RepoMeta {
     final raw = _readRaw(repoRoot);
     raw['lastOpened'] = relativePath;
     _write(repoRoot, raw);
+  }
+
+  /// 读取文章的已保存滚动进度（0~1 的比例位置），无记录返回 null。
+  static double? readProgress(String repoRoot, String relativePath) {
+    final map = _readRaw(repoRoot)['progress'];
+    if (map is! Map<String, dynamic>) return null;
+    final v = map[relativePath.replaceAll('\\', '/')];
+    if (v is! num) return null;
+    return v.clamp(0.0, 1.0).toDouble();
+  }
+
+  /// 保存文章滚动进度（0~1 比例，跨设备/字号变化可恢复）。
+  static void saveProgress(
+    String repoRoot,
+    String relativePath,
+    double fraction,
+  ) {
+    final raw = _readRaw(repoRoot);
+    final map = (raw['progress'] as Map<String, dynamic>?) ?? {};
+    map[relativePath.replaceAll('\\', '/')] = fraction;
+    raw['progress'] = map;
+    _write(repoRoot, raw);
+  }
+
+  /// 文章是否已收藏。
+  static bool isStarred(String repoRoot, String relativePath) {
+    final list = _readRaw(repoRoot)['starred'];
+    return list is List &&
+        list.contains(relativePath.replaceAll('\\', '/'));
+  }
+
+  /// 切换收藏状态，返回切换后的状态。
+  static bool toggleStar(String repoRoot, String relativePath) {
+    final raw = _readRaw(repoRoot);
+    final key = relativePath.replaceAll('\\', '/');
+    final list = ((raw['starred'] as List?) ?? []).cast<String>().toList();
+    if (!list.remove(key)) list.insert(0, key);
+    raw['starred'] = list;
+    _write(repoRoot, raw);
+    return list.contains(key);
+  }
+
+  /// 全仓库收藏列表（按收藏先后，新的在前）。
+  static List<String> starredFiles(String repoRoot) =>
+      ((read(repoRoot) == null ? null : _readRaw(repoRoot)['starred'])
+              as List?)
+          ?.cast<String>()
+          .toList() ??
+      const [];
+
+  /// 记录一次阅读到全局最近阅读（去重、新的在前、限量）。
+  /// 每条格式 `仓库名<TAB>相对路径`，跨仓库聚合展示。
+  static void pushRecent(String repoRoot, String relativePath) {
+    final name = repoRoot.split(Platform.pathSeparator).last;
+    final entry = '$name\t${relativePath.replaceAll('\\', '/')}';
+    final f = _recentsFile(repoRoot);
+    final raw = _readJson(f);
+    final list = (raw['recents'] as List?)?.cast<String>().toList() ?? [];
+    list
+      ..remove(entry)
+      ..insert(0, entry);
+    if (list.length > _maxEntries) {
+      list.removeRange(_maxEntries, list.length);
+    }
+    raw['recents'] = list;
+    _writeJson(f, raw);
+  }
+
+  /// 全局最近阅读列表，新的在前，每条为 (仓库名, 相对路径)。
+  static List<(String, String)> readRecents(String reposRoot) =>
+      ((_readJson(_recentsFile(reposRoot))['recents'] as List?) ?? const [])
+          .cast<String>()
+          .map((e) {
+        final i = e.indexOf('\t');
+        return i < 0 ? null : (e.substring(0, i), e.substring(i + 1));
+      })
+          .whereType<(String, String)>()
+          .toList();
+
+  static Map<String, dynamic> _readJson(File f) {
+    if (!f.existsSync()) return <String, dynamic>{};
+    try {
+      final d = jsonDecode(f.readAsStringSync());
+      return d is Map<String, dynamic> ? d : <String, dynamic>{};
+    } on Object {
+      return <String, dynamic>{};
+    }
+  }
+
+  static void _writeJson(File f, Map<String, dynamic> raw) {
+    try {
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode(raw));
+    } on Object {
+      // 元数据仅用于展示，写失败不影响功能
+    }
+  }
+
+  /// 全局最近阅读文件：`<reposRoot>/.meta/recents.json`。
+  /// repoRoot 可传仓库目录（取其父级）或 repos 根目录本身。
+  static File _recentsFile(String repoOrReposRoot) {
+    final p = repoOrReposRoot;
+    final reposRoot =
+        Directory('$p${Platform.pathSeparator}.git').existsSync()
+            ? Directory(p).parent.path
+            : p;
+    return File(
+      '$reposRoot${Platform.pathSeparator}.meta'
+      '${Platform.pathSeparator}recents.json',
+    );
   }
 
   static void remove(String repoRoot) {

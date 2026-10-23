@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../git/repo_meta.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
+import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
@@ -58,7 +59,7 @@ class MarkdownViewerPage extends StatefulWidget {
   /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
   /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
   static String normalizeHtmlImages(String md) {
-    return md
+    final stripped = md
         .replaceAllMapped(
           _htmlImgRegExp,
           (m) => '\n\n![](${m.group(1)!})\n\n',
@@ -77,33 +78,53 @@ class MarkdownViewerPage extends StatefulWidget {
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
         .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n')
         // 徽章/SVG 图片在排版中无意义，直接忽略
-        .replaceAll(_ignoredImageRegExp, '')
-        // 行内样式标签转 Markdown 等价语法（保护代码围栏不转换）
-        .replaceAllMapped(_inlineHtmlFenceRegExp, (m) {
-      if (m.group(1) != null) return m.group(1)!; // 围栏内原样保留
-      return _convertInlineHtmlTags(m.group(2)!);
-    });
+        .replaceAll(_ignoredImageRegExp, '');
+    // 行内/块级样式标签转 Markdown 等价语法：按代码围栏切分，
+    // 围栏内原样保留，仅转换围栏外的文本
+    const fence = r'```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)';
+    final out = StringBuffer();
+    var cursor = 0;
+    for (final m in RegExp(fence).allMatches(stripped)) {
+      out
+        ..write(_convertHtmlTags(stripped.substring(cursor, m.start)))
+        ..write(m.group(0)!);
+      cursor = m.end;
+    }
+    out.write(_convertHtmlTags(stripped.substring(cursor)));
+    return out.toString();
   }
 
-  /// 按 fenced code block 分段：group(1)=围栏段，group(2)=普通段。
-  static final RegExp _inlineHtmlFenceRegExp =
-      RegExp(r'(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))|([\s\S]*?)');
-
-  /// 行内 HTML 标签转 Markdown：strong/b→加粗、em/i→斜体、
-  /// del/s/strike→删除线；u/mark/kbd/sub/sup/span 等无等价
-  /// 语法的剥壳保留文字，避免原文出现标签残渣。
-  static String _convertInlineHtmlTags(String md) {
-    return md
+  /// HTML 标签转 Markdown：
+  /// 块级 h1-h6 → `#` 标题；strong/b→加粗、em/i→斜体、del/s/strike→删除线；
+  /// u/mark/kbd/sub/sup/small/span/font 等无等价语法的剥壳保留文字。
+  static String _convertHtmlTags(String md) {
+    var text = md;
+    // 块级标题：<h1>标题</h1> → # 标题（多行内容取首行）
+    text = text.replaceAllMapped(
+      RegExp(
+        r'<h([1-6])\b[^>]*>([\s\S]*?)</h\1\s*>',
+        caseSensitive: false,
+      ),
+      (m) {
+        final level = int.parse(m.group(1)!);
+        final inner =
+            m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+        return '\n\n${'#' * level} $inner\n\n';
+      },
+    );
+    return text
         .replaceAllMapped(
-          RegExp(r'<(strong|b)>([\s\S]*?)</\1>', caseSensitive: false),
+          RegExp(r'<(strong|b)\b[^>]*>([\s\S]*?)</\1\s*>',
+              caseSensitive: false),
           (m) => '**${m.group(2)!}**',
         )
         .replaceAllMapped(
-          RegExp(r'<(em|i)>([\s\S]*?)</\1>', caseSensitive: false),
+          RegExp(r'<(em|i)\b[^>]*>([\s\S]*?)</\1\s*>', caseSensitive: false),
           (m) => '*${m.group(2)!}*',
         )
         .replaceAllMapped(
-          RegExp(r'<(del|s|strike)>([\s\S]*?)</\1>', caseSensitive: false),
+          RegExp(r'<(del|s|strike)\b[^>]*>([\s\S]*?)</\1\s*>',
+              caseSensitive: false),
           (m) => '~~${m.group(2)!}~~',
         )
         .replaceAll(
@@ -174,6 +195,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   void initState() {
     super.initState();
     _content = _load();
+    _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
     _scrollController.addListener(_onScroll);
     AppPrefs.loadFontIndex().then((i) {
       if (mounted && i >= 0 && i < _fontSizes.length) {
@@ -181,6 +203,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       }
     });
   }
+
+  bool _starred = false;
+  // 进度恢复只做一次（内容构建完成后）；保存按滚动节流
+  bool _restorePending = true;
+  DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void dispose() {
@@ -202,6 +229,32 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
       _lastSectionUpdate = now;
       _updateCurrentSection();
+    }
+    // 进度：恢复一次；之后按 800ms 节流保存比例位置
+    final max = _scrollController.position.maxScrollExtent;
+    if (_restorePending) {
+      _restorePending = false;
+      final saved = RepoMeta.readProgress(
+        widget.repoRoot,
+        widget.note.relativePath,
+      );
+      if (saved != null && saved > 0.005 && max > 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(saved * _scrollController.position.maxScrollExtent);
+          }
+        });
+      }
+      return;
+    }
+    if (max > 0 &&
+        now.difference(_lastProgressSave) >= const Duration(milliseconds: 800)) {
+      _lastProgressSave = now;
+      RepoMeta.saveProgress(
+        widget.repoRoot,
+        widget.note.relativePath,
+        (_scrollController.offset / max).clamp(0.0, 1.0),
+      );
     }
   }
 
@@ -229,6 +282,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     var raw = await File(widget.note.absolutePath).readAsString();
     _rawSource = raw;
     RepoMeta.touchLastOpened(widget.repoRoot, widget.note.relativePath);
+    RepoMeta.pushRecent(widget.repoRoot, widget.note.relativePath);
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);
@@ -258,6 +312,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(
+            tooltip: _starred ? '取消收藏' : '收藏',
+            icon: Icon(
+              _starred ? Icons.star_rounded : Icons.star_outline_rounded,
+              color: _starred ? const Color(0xFFF5B301) : null,
+            ),
+            onPressed: () {
+              setState(() {
+                _starred = RepoMeta.toggleStar(
+                  widget.repoRoot,
+                  widget.note.relativePath,
+                );
+              });
+            },
+          ),
           if (_tags.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -467,7 +536,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     MarkdownConfig config,
   ) {
     final generator = MarkdownGenerator(
+      inlineSyntaxList: [MathInlineSyntax(), MathBlockSyntax()],
       generators: [
+        SpanNodeGeneratorWithTag(
+          tag: 'math',
+          generator: (element, config, visitor) =>
+              MathNode(element.textContent),
+        ),
+        SpanNodeGeneratorWithTag(
+          tag: 'mathblock',
+          generator: (element, config, visitor) => MathNode(
+            element.textContent,
+            display: true,
+          ),
+        ),
         SpanNodeGeneratorWithTag(
           tag: 'blockquote',
           generator: (element, config, visitor) => _CardBlockquoteNode(
@@ -493,7 +575,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           final tocList = tocs ?? const <Toc>[];
           for (final toc in tocList) {
             final idx = toc.widgetIndex;
-            if (idx >= 0 && idx < widgets.length) {
+            // _headingKeys 按 extractToc 的 ATX 标题数生成；markdown_widget
+            // 还会识别 setext（===/--- 下划线）等形式，计数可能更多，
+            // 越界时跳过锚点挂载，避免 RangeError
+            if (idx >= 0 &&
+                idx < widgets.length &&
+                anchorIndex < _headingKeys.length) {
               widgets[idx] = AutoScrollTag(
                 key: ValueKey('toc-$anchorIndex'),
                 index: anchorIndex,

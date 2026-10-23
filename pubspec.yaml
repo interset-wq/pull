@@ -1,5 +1,5 @@
 name: reader
-description: "A new Flutter project."
+description: "把 git 笔记仓库克隆到手机，原生阅读器体验：Markdown/Notebook 渲染、代码高亮、TOC、目录树浏览。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

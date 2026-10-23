@@ -88,6 +88,19 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
+          Text('阅读', style: theme.textTheme.titleMedium),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.screen_lock_portrait_outlined),
+              title: const Text('屏幕常亮'),
+              subtitle: const Text('阅读文章时屏幕不会自动熄灭'),
+              value: prefs.keepScreenOn,
+              onChanged: (v) => prefs.setKeepScreenOn(v),
+            ),
+          ),
+          const SizedBox(height: 16),
           Text('应用', style: theme.textTheme.titleMedium),
           ListTile(
             contentPadding: EdgeInsets.zero,

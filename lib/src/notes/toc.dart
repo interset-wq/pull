@@ -12,22 +12,53 @@ class TocEntry {
   final String text;
 }
 
+final _fenceOpen = RegExp(r'^(`{3,}|~{3,})');
+final _heading = RegExp(r'^(#{1,6})\s+(.+?)\s*#*\s*$');
+
 /// 提取全部 ATX 标题（# 形式），保持出现顺序。
+///
+/// 围栏判定按 CommonMark，而不是「见 ``` 就翻转」：
+/// - 开栏的 info string 不能包含围栏字符本身（`` ```text``` `` 这类
+///   行内代码不是围栏；波浪线围栏无此限制，info 可含反引号）；
+/// - 闭栏必须与开栏同字符、长度不小于开栏，且其后只允许空白。
+/// 否则形如 `` ```……``` `` 的注释行会被误判为闭栏，围栏状态从此
+/// 整体反转，代码块里的 `# 注释` 被当成标题混入 TOC。
 List<TocEntry> extractToc(String markdown) {
   final entries = <TocEntry>[];
-  var inFence = false;
+  var fenceChar = '';
+  var fenceLen = 0;
   for (final line in markdown.split('\n')) {
-    final trimmed = line.trimLeft();
-    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
-      inFence = !inFence;
+    // trimRight 去掉 CRLF 的 '\r'（Windows 仓库常见），否则闭栏正则
+    // `[ \t]*$` 匹配不上 '```\r'，围栏永不闭合
+    final trimmed = line.trim();
+    if (fenceChar.isEmpty) {
+      final m = _fenceOpen.firstMatch(trimmed);
+      if (m != null) {
+        final marker = m.group(1)!;
+        final rest = trimmed.substring(marker.length);
+        final canOpen = marker[0] == '~' || !rest.contains('`');
+        if (canOpen) {
+          fenceChar = marker[0];
+          fenceLen = marker.length;
+          continue;
+        }
+      }
+    } else {
+      final m = RegExp(
+        '^${RegExp.escape(fenceChar)}{$fenceLen,}[ \t]*\$',
+      ).firstMatch(trimmed);
+      if (m != null) {
+        fenceChar = '';
+        fenceLen = 0;
+      }
+      // 围栏内一律跳过（无论本行是否为闭栏）
       continue;
     }
-    if (inFence) continue;
-    final m = RegExp(r'^(#{1,6})\s+(.+?)\s*#*\s*$').firstMatch(trimmed);
-    if (m != null) {
-      final text = m.group(2)!.trim();
+    final h = _heading.firstMatch(trimmed);
+    if (h != null) {
+      final text = h.group(2)!.trim();
       if (text.isNotEmpty) {
-        entries.add(TocEntry(level: m.group(1)!.length, text: text));
+        entries.add(TocEntry(level: h.group(1)!.length, text: text));
       }
     }
   }

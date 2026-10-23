@@ -7,6 +7,7 @@ import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../git/repo_meta.dart';
 import '../notes/gfm_alerts.dart';
@@ -197,6 +198,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _content = _load();
     _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
     _scrollController.addListener(_onScroll);
+    // 屏幕常亮：仅阅读页生效，离开即恢复系统行为
+    if (AppPrefs.instance?.keepScreenOn ?? false) {
+      WakelockPlus.enable();
+    }
     AppPrefs.loadFontIndex().then((i) {
       if (mounted && i >= 0 && i < _fontSizes.length) {
         setState(() => _fontIndex = i);
@@ -211,6 +216,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _currentSection.dispose();
@@ -311,6 +317,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           _title ?? widget.note.fileName,
           overflow: TextOverflow.ellipsis,
         ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(32),
+          child: _buildBreadcrumb(theme),
+        ),
         actions: [
           IconButton(
             tooltip: _starred ? '取消收藏' : '收藏',
@@ -399,6 +409,108 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               return _renderBody(snapshot.data!, theme, config);
             },
           ),
+      bottomNavigationBar: _buildFooterNav(theme),
+    );
+  }
+
+  /// 面包屑行：仓库名 / 目录1 / 目录2 …（当前文章文件名不算层级）。
+  /// 收藏/最近阅读直接进入时栈里没有目录页，点击面包屑
+  /// 先尝试弹出返回栈中最近的仓库页，否则新建一个 RepoPage 推入。
+  Widget _buildBreadcrumb(ThemeData theme) {
+    final repoName =
+        widget.repoRoot.split(Platform.pathSeparator).last;
+    final segments = widget.note.relativePath
+        .replaceAll('\\', '/')
+        .split('/')
+      ..removeLast()
+      ..removeWhere((s) => s.isEmpty);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    void backToRepo() {
+      // 收藏/最近阅读直达时栈里没有仓库页，popUntil 会一路退到首页；
+      // 此时用 pushedRoute 标记：先退栈，再补一个仓库根目录页。
+      var foundRepoRoute = false;
+      Navigator.of(context).popUntil((route) {
+        if (route.settings.name == 'repo-root') {
+          foundRepoRoute = true;
+          return true;
+        }
+        return route.isFirst;
+      });
+      if (!foundRepoRoute) {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RepoPage(repoDir: Directory(widget.repoRoot)),
+            settings: const RouteSettings(name: 'repo-root'),
+          ),
+        );
+      }
+    }
+
+    return SizedBox(
+      height: 32,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          reverse: true,
+          child: Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(4),
+                onTap: backToRepo,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+                  child: Text(repoName, style: style),
+                ),
+              ),
+              for (var i = 0; i < segments.length; i++) ...[
+                Text(' / ', style: style),
+                InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: backToRepo,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 6,
+                    ),
+                    child: Text(segments.sublist(0, i + 1).join('/'),
+                        style: style),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 底部常驻翻页条：上一篇/下一篇始终可用，不必滚到文末。
+  /// 同目录仅一篇或索引未就绪时不显示。
+  Widget _buildFooterNav(ThemeData theme) {
+    if (_siblings.isEmpty || _siblingIndex < 0 || _siblings.length < 2) {
+      return const SizedBox.shrink();
+    }
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border(
+            top: BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: _PrevNextNav(
+          siblings: _siblings,
+          index: _siblingIndex,
+          onOpen: _openSibling,
+        ),
+      ),
     );
   }
 
@@ -598,19 +710,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
-    if (_siblings.length > 1 && _siblingIndex >= 0) {
-      children.addAll([
-        const Divider(height: 40),
-        _PrevNextNav(
-          siblings: _siblings,
-          index: _siblingIndex,
-          onOpen: _openSibling,
-        ),
-        const SizedBox(height: 16),
-      ]);
-    }
-    // 底部留白：防止浮动按钮（目录/回顶/回底）遮住末尾文字与翻页按钮
-    children.add(const SizedBox(height: 120));
+    // 底部留白：防止常驻翻页 footer 与浮动按钮遮住末尾文字
+    children.add(const SizedBox(height: 150));
     return Scrollbar(
       key: _viewportKey,
       controller: _scrollController,

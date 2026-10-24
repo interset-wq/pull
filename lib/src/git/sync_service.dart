@@ -31,12 +31,26 @@ class GitSyncService {
     // 不可跨 isolate 发送的内容，直接抛出会导致 Future 永不完成（UI 死转）
     await Isolate.run(() {
       try {
-        final r = Repository.clone(
-          url: url,
-          localPath: targetPath,
-          checkoutBranch: branch,
-        );
-        r.free();
+        try {
+          final r = Repository.clone(
+            url: url,
+            localPath: targetPath,
+            checkoutBranch: branch,
+          );
+          r.free();
+        } catch (_) {
+          // fork 仓库的 default_branch 可能与实际分支不符
+          // （GIT_ERROR_REFERENCE: refs/remotes/origin/<branch> not found）。
+          // 回退为不指定分支：libgit2 检出远端 HEAD（真实默认分支）。
+          final dir = Directory(targetPath);
+          if (dir.existsSync()) {
+            try {
+              dir.deleteSync(recursive: true);
+            } catch (_) {}
+          }
+          final r = Repository.clone(url: url, localPath: targetPath);
+          r.free();
+        }
       } catch (e) {
         throw Exception('$e');
       }

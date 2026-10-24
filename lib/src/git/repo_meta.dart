@@ -161,7 +161,11 @@ class RepoMeta {
 
   /// 记录一次阅读到全局最近阅读（去重、新的在前、限量）。
   /// 每条格式 `仓库名<TAB>相对路径`，跨仓库聚合展示。
-  static void pushRecent(String repoRoot, String relativePath) {
+  static void pushRecent(
+    String repoRoot,
+    String relativePath, {
+    int limit = 5,
+  }) {
     final name = repoRoot.split(Platform.pathSeparator).last;
     final entry = '$name\t${relativePath.replaceAll('\\', '/')}';
     final f = _recentsFile(repoRoot);
@@ -170,11 +174,40 @@ class RepoMeta {
     list
       ..remove(entry)
       ..insert(0, entry);
-    if (list.length > _maxEntries) {
-      list.removeRange(_maxEntries, list.length);
+    final cap = limit.clamp(1, _maxEntries);
+    if (list.length > cap) {
+      list.removeRange(cap, list.length);
     }
     raw['recents'] = list;
     _writeJson(f, raw);
+  }
+
+  /// 清空全局最近阅读。
+  static void clearRecents(String reposRoot) {
+    final f = _recentsFile(reposRoot);
+    if (f.existsSync()) {
+      try {
+        f.deleteSync();
+      } on Object {
+        // 忽略
+      }
+    }
+  }
+
+  /// 清空所有仓库的收藏。
+  static void clearAllStars(String reposRoot) {
+    final root = Directory(reposRoot);
+    if (!root.existsSync()) return;
+    for (final d in root.listSync(followLinks: false)) {
+      if (d is! Directory) continue;
+      if (!Directory('${d.path}${Platform.pathSeparator}.git').existsSync()) {
+        continue;
+      }
+      final raw = _readRaw(d.path);
+      if (!raw.containsKey('starred')) continue;
+      raw['starred'] = <String>[];
+      _write(d.path, raw);
+    }
   }
 
   /// 全局最近阅读列表，新的在前，每条为 (仓库名, 相对路径)。

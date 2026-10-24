@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../git/repo_meta.dart';
 import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
@@ -143,6 +147,58 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.history),
+              title: const Text('历史长度'),
+              subtitle: Text('首页「最近阅读」最多保留 ${prefs.recentsLimit} 条'),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.recentsLimit.toDouble(),
+                  min: 1,
+                  max: 20,
+                  divisions: 19,
+                  label: '${prefs.recentsLimit}',
+                  onChanged: (v) => prefs.setRecentsLimit(v.round()),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('数据', style: theme.textTheme.titleMedium),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history_toggle_off),
+            title: const Text('清空阅读历史'),
+            subtitle: const Text('删除所有「最近阅读」记录'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => _confirmClear(
+              context,
+              title: '清空阅读历史',
+              message: '确定清空所有「最近阅读」记录吗？此操作不可撤销。',
+              onConfirm: () {
+                _clearData(context, clear: (root) => RepoMeta.clearRecents(root));
+              },
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.star_outline),
+            title: const Text('清空收藏'),
+            subtitle: const Text('删除所有仓库中的收藏文章'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => _confirmClear(
+              context,
+              title: '清空收藏',
+              message: '确定清空所有仓库的收藏文章吗？此操作不可撤销。',
+              onConfirm: () {
+                _clearData(context, clear: (root) => RepoMeta.clearAllStars(root));
+              },
+            ),
+          ),
           const SizedBox(height: 16),
           Text('应用', style: theme.textTheme.titleMedium),
           ListTile(
@@ -158,6 +214,47 @@ class SettingsPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  /// 清空类操作统一走二次确认对话框。
+  Future<void> _confirmClear(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required VoidCallback onConfirm,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok ?? false) onConfirm();
+  }
+
+  /// 在应用文档目录的 repos 根执行清空，并给出结果反馈。
+  Future<void> _clearData(
+    BuildContext context, {
+    required void Function(String reposRoot) clear,
+  }) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final root = '${docs.path}${Platform.pathSeparator}repos';
+    clear(root);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已清空')),
     );
   }
 }

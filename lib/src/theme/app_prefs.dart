@@ -18,6 +18,7 @@ class AppPrefs extends ChangeNotifier {
     this._codeLineNumbers,
     this._codeFoldThreshold,
     this._codeFoldEnabled,
+    this._recentsLimit,
   );
 
   static const _modeKey = 'themeMode';
@@ -29,6 +30,7 @@ class AppPrefs extends ChangeNotifier {
   static const _codeLineNumbersKey = 'codeLineNumbers';
   static const _codeFoldThresholdKey = 'codeFoldThreshold';
   static const _codeFoldEnabledKey = 'codeFoldEnabled';
+  static const _recentsLimitKey = 'recentsLimit';
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
@@ -58,6 +60,11 @@ class AppPrefs extends ChangeNotifier {
   bool? _codeFoldEnabled;
   bool get codeFoldEnabled => _codeFoldEnabled ?? true;
 
+  // 同 codeLineNumbers：热重载会保留无此参数的旧实例（字段为 null），
+  // getter 兜底默认值
+  int? _recentsLimit;
+  int get recentsLimit => _recentsLimit ?? 5;
+
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
 
@@ -73,6 +80,7 @@ class AppPrefs extends ChangeNotifier {
     var codeLineNumbers = true;
     var codeFoldThreshold = 30;
     var codeFoldEnabled = true;
+    var recentsLimit = 5;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -99,6 +107,7 @@ class AppPrefs extends ChangeNotifier {
       };
       codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
       codeFoldEnabled = sp.getBool(_codeFoldEnabledKey) ?? true;
+      recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -111,6 +120,7 @@ class AppPrefs extends ChangeNotifier {
       codeLineNumbers,
       codeFoldThreshold.clamp(10, 200),
       codeFoldEnabled,
+      recentsLimit,
     );
   }
 
@@ -191,6 +201,20 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_codeFoldEnabledKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setRecentsLimit(int v) async {
+    final clamped = v.clamp(1, 20);
+    if (clamped == recentsLimit) return;
+    _recentsLimit = clamped;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setInt(_recentsLimitKey, clamped);
     } on Object {
       // 保存失败不影响本次会话
     }

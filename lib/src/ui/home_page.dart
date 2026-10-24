@@ -330,6 +330,7 @@ class _HomePageState extends State<HomePage> {
         d.path.split(Platform.pathSeparator).last: d,
     };
     return RepoMeta.readRecents(root.path)
+        .take(AppPrefs.instance?.recentsLimit ?? 5)
         .map((e) => byName[e.$1] == null ? null : (byName[e.$1]!, e.$2))
         .whereType<(Directory, String)>()
         .toList();

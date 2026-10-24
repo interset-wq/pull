@@ -90,26 +90,47 @@ class RepoMeta {
     _write(repoRoot, raw);
   }
 
-  /// 读取文章的已保存滚动进度（0~1 的比例位置），无记录返回 null。
-  static double? readProgress(String repoRoot, String relativePath) {
+  /// 读取文章的已保存进度，返回 (比例 0~1, 最近标题索引)。
+  /// 兼容旧数据：只存了比例（num）时标题索引为 null。
+  static (double, int?) readProgressInfo(
+    String repoRoot,
+    String relativePath,
+  ) {
     final map = _readRaw(repoRoot)['progress'];
-    if (map is! Map<String, dynamic>) return null;
+    if (map is! Map<String, dynamic>) return (0.0, null);
     final v = map[relativePath.replaceAll('\\', '/')];
-    if (v is! num) return null;
-    return v.clamp(0.0, 1.0).toDouble();
+    if (v is num) return (v.clamp(0.0, 1.0).toDouble(), null);
+    if (v is Map<String, dynamic>) {
+      final f = (v['f'] as num?)?.clamp(0.0, 1.0).toDouble() ?? 0.0;
+      final h = v['h'] is int ? v['h'] as int : null;
+      return (f, h);
+    }
+    return (0.0, null);
   }
 
-  /// 保存文章滚动进度（0~1 比例，跨设备/字号变化可恢复）。
-  static void saveProgress(
+  /// 保存文章进度：比例（兜底）+ 最近标题索引（恢复时按段落锚点
+  /// 定位，比纯比例更准——字号/窗口变化导致的布局高度漂移不影响
+  /// 标题的位置）。
+  static void saveProgressInfo(
     String repoRoot,
     String relativePath,
     double fraction,
+    int? headingIndex,
   ) {
     final raw = _readRaw(repoRoot);
-    final map = (raw['progress'] as Map<String, dynamic>?) ?? {};
-    map[relativePath.replaceAll('\\', '/')] = fraction;
+    final map = (raw['progress'] as Map<String, dynamic>? ) ?? {};
+    map[relativePath.replaceAll('\\', '/')] = {
+      'f': fraction,
+      if (headingIndex != null && headingIndex >= 0) 'h': headingIndex,
+    };
     raw['progress'] = map;
     _write(repoRoot, raw);
+  }
+
+  /// 读取文章的已保存滚动进度（0~1 的比例位置），无记录返回 null。
+  static double? readProgress(String repoRoot, String relativePath) {
+    final (f, _) = readProgressInfo(repoRoot, relativePath);
+    return f > 0 ? f : null;
   }
 
   /// 文章是否已收藏。

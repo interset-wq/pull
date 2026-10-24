@@ -81,10 +81,19 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
             transformationController: _transformer,
             maxScale: 5,
             child: Center(
-              child: buildRepoImage(
-                widget.sources[index],
-                baseDir: widget.baseDir,
-              ),
+              // 仅当前页包 Hero：转场从正文小图飞入；翻页后的其他页不参与
+              child: index == widget.initialIndex
+                  ? Hero(
+                      tag: 'img-${widget.sources[index]}',
+                      child: buildRepoImage(
+                        widget.sources[index],
+                        baseDir: widget.baseDir,
+                      ),
+                    )
+                  : buildRepoImage(
+                      widget.sources[index],
+                      baseDir: widget.baseDir,
+                    ),
             ),
           ),
         ),

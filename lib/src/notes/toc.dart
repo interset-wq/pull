@@ -3,13 +3,21 @@ library;
 
 /// 一个目录条目。
 class TocEntry {
-  const TocEntry({required this.level, required this.text});
+  const TocEntry({
+    required this.level,
+    required this.text,
+    this.line = 0,
+  });
 
   /// 标题层级 1-6。
   final int level;
 
   /// 标题文本（去掉了 # 与尾随 #）。
   final String text;
+
+  /// 标题行在原文中的索引（0 基，按 '\n' 切分）；0 表示未知。
+  /// 供文内搜索按章节定位。
+  final int line;
 }
 
 final _fenceOpen = RegExp(r'^(`{3,}|~{3,})');
@@ -27,10 +35,11 @@ List<TocEntry> extractToc(String markdown) {
   final entries = <TocEntry>[];
   var fenceChar = '';
   var fenceLen = 0;
-  for (final line in markdown.split('\n')) {
+  final lines = markdown.split('\n');
+  for (var i = 0; i < lines.length; i++) {
     // trimRight 去掉 CRLF 的 '\r'（Windows 仓库常见），否则闭栏正则
     // `[ \t]*$` 匹配不上 '```\r'，围栏永不闭合
-    final trimmed = line.trim();
+    final trimmed = lines[i].trim();
     if (fenceChar.isEmpty) {
       final m = _fenceOpen.firstMatch(trimmed);
       if (m != null) {
@@ -58,7 +67,11 @@ List<TocEntry> extractToc(String markdown) {
     if (h != null) {
       final text = h.group(2)!.trim();
       if (text.isNotEmpty) {
-        entries.add(TocEntry(level: h.group(1)!.length, text: text));
+        entries.add(TocEntry(
+          level: h.group(1)!.length,
+          text: text,
+          line: i,
+        ));
       }
     }
   }

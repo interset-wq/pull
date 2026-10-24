@@ -3,6 +3,8 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:markdown/markdown.dart' as m;
 import 'package:markdown_widget/markdown_widget.dart';
 
+import '../ui/h_scrollbar.dart';
+
 /// 行内公式：`$...$`（非贪婪，不匹配 `$100` 纯数字金额）。
 class MathInlineSyntax extends m.InlineSyntax {
   MathInlineSyntax() : super(r'\$([^$\n]+?)\$');
@@ -37,13 +39,24 @@ class MathNode extends SpanNode {
   @override
   InlineSpan build() {
     try {
+      final math = Math.tex(
+        tex,
+        mathStyle: display ? MathStyle.display : MathStyle.text,
+        textStyle: style ?? const TextStyle(fontSize: 15),
+      );
+      // 块级公式超宽时横向滚动而非截断（与代码块同一模式）；
+      // 行内公式保持随文流式排版
+      final Widget child = display
+          ? LayoutBuilder(
+              builder: (context, constraints) =>
+                  constraints.maxWidth.isFinite
+                      ? HScrollbar(bottomPadding: 2, child: math)
+                      : math,
+            )
+          : math;
       return WidgetSpan(
         alignment: PlaceholderAlignment.middle,
-        child: Math.tex(
-          tex,
-          mathStyle: display ? MathStyle.display : MathStyle.text,
-          textStyle: style ?? const TextStyle(fontSize: 15),
-        ),
+        child: child,
       );
     } on Object {
       // 解析失败时回退为等宽文本，避免整页崩溃

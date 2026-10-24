@@ -15,6 +15,7 @@ import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
+import '../notes/table_layout.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -492,7 +493,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               }
               final fontSize = _fontSizes[_fontIndex];
               final isDark = theme.brightness == Brightness.dark;
-              final config = _markdownConfig(theme, isDark, fontSize);
+              final config = _markdownConfig(theme, isDark, fontSize, snapshot.data!);
               return _renderBody(snapshot.data!, theme, config);
             },
           ),
@@ -690,6 +691,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     ThemeData theme,
     bool isDark,
     double fontSize,
+    String body,
   ) {
     return MarkdownConfig(
       configs: [
@@ -798,6 +800,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 注意：不要设置 headerStyle——包内 TBodyNode 也读取 headerStyle
           // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
           // 不设置时包内默认即"表头加粗、正文正常"。
+          // 列宽策略：含长代码/长串/多列的文档保留固有列宽 + 横滚，
+          // 纯文本文档用 FlexColumnWidth 换行铺满屏宽（免长横滚条）
+          defaultColumnWidth:
+              detectTableLayout(body) == TableLayout.wrap
+                  ? const FlexColumnWidth()
+                  : const IntrinsicColumnWidth(),
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,
             width: 1,

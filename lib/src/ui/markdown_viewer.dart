@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
@@ -156,6 +158,31 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   String? _title;
   List<String> _tags = const [];
   List<TocEntry> _toc = const [];
+
+  /// 剩余阅读时间（分钟，_load 时估算一次）。
+  int _readingMinutes = 0;
+
+  /// 最近一次进入视口的标题索引（进度记忆的锚点）。
+  int _lastHeadingIndex = -1;
+
+  // ---- 文内搜索 ----
+  bool _searchBarVisible = false;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  /// 渲染视图命中行（基于 _bodyForSearch，与 _toc 行号同基准）。
+  List<int> _searchHitLines = [];
+
+  /// Raw 视图命中行（基于 _rawSource）。
+  List<int> _rawSearchHitLines = [];
+  int _searchCurrent = -1;
+
+  /// 渲染正文（front-matter/ipynb 转换后），搜索与 _toc 同源。
+  String _bodyForSearch = '';
+
+  /// 当前闪烁高亮的标题索引（搜索定位提示），-1 = 无。
+  final ValueNotifier<int> _flashHeading = ValueNotifier(-1);
+  Timer? _flashTimer;
   List<String> _imageUrls = const [];
   String? _rawSource;
   bool _showRaw = false;
@@ -167,6 +194,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   final List<GlobalKey> _headingKeys = [];
   final GlobalKey _viewportKey = GlobalKey();
   DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 滚动进度（0~1），驱动 AppBar 底部的细进度条。
+  final ValueNotifier<double> _progressNotifier = ValueNotifier(0);
 
   /// 同目录下的文章列表（供上一篇/下一篇切换），按文件名排序。
   List<NoteFile> _siblings = const [];
@@ -217,11 +247,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _currentSection.dispose();
+    _progressNotifier.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _flashHeading.dispose();
+    _flashTimer?.cancel();
     super.dispose();
   }
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
+    // 顶部细进度条：按滚动比例实时更新
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    _progressNotifier.value =
+        maxExtent > 0 ? (_scrollController.offset / maxExtent).clamp(0.0, 1.0) : 0;
     // 章节定位节流：避免每次滚动帧都遍历标题
     final now = DateTime.now();
     if (now.difference(_lastSectionUpdate) >= const Duration(milliseconds: 120)) {
@@ -232,14 +271,26 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     final max = _scrollController.position.maxScrollExtent;
     if (_restorePending) {
       _restorePending = false;
-      final saved = RepoMeta.readProgress(
+      final (saved, headingIdx) = RepoMeta.readProgressInfo(
         widget.repoRoot,
         widget.note.relativePath,
       );
-      if (saved != null && saved > 0.005 && max > 0) {
+      if (saved > 0.005 && max > 0) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(saved * _scrollController.position.maxScrollExtent);
+          if (!_scrollController.hasClients) return;
+          // 标题锚点优先：字号/窗口变化导致布局高度漂移时，
+          // 标题位置不受影响，比纯比例恢复更准
+          if (headingIdx != null &&
+              headingIdx >= 0 &&
+              headingIdx < _headingKeys.length &&
+              _headingKeys[headingIdx].currentContext != null) {
+            Scrollable.ensureVisible(
+              _headingKeys[headingIdx].currentContext!,
+              duration: const Duration(milliseconds: 1),
+            );
+          } else {
+            _scrollController
+                .jumpTo(saved * _scrollController.position.maxScrollExtent);
           }
         });
       }
@@ -248,10 +299,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (max > 0 &&
         now.difference(_lastProgressSave) >= const Duration(milliseconds: 800)) {
       _lastProgressSave = now;
-      RepoMeta.saveProgress(
+      RepoMeta.saveProgressInfo(
         widget.repoRoot,
         widget.note.relativePath,
         (_scrollController.offset / max).clamp(0.0, 1.0),
+        _lastHeadingIndex,
       );
     }
   }
@@ -273,6 +325,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
     if (current != _currentSection.value) {
       _currentSection.value = current;
+      if (current >= 0) _lastHeadingIndex = current;
     }
   }
 
@@ -297,7 +350,31 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ..clear()
       ..addAll(List.generate(_toc.length, (_) => GlobalKey()));
     _imageUrls = MarkdownViewerPage.collectImageUrls(body);
+    _bodyForSearch = body;
+    _readingMinutes = _estimateReadingMinutes(body);
     return body;
+  }
+
+  /// 估算阅读分钟数：正文按 300 字/分钟，代码块按 200 字符/分钟折算，
+  /// 结果保留 1 位小数精度（<1 分钟显示"约 1 分钟"）。
+  int _estimateReadingMinutes(String body) {
+    var codeChars = 0;
+    var textChars = 0;
+    var inFence = false;
+    for (final line in body.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('```') || t.startsWith('~~~')) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) {
+        codeChars += t.length;
+      } else {
+        textChars += t.replaceAll(RegExp(r'\s'), '').length;
+      }
+    }
+    final minutes = textChars / 300 + codeChars / 200;
+    return minutes < 1 ? 1 : minutes.ceil();
   }
 
   @override
@@ -308,6 +385,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         title: Text(
           _title ?? widget.note.fileName,
           overflow: TextOverflow.ellipsis,
+        ),
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(_searchBarVisible ? 50 : 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_searchBarVisible) _buildSearchBar(theme),
+              ValueListenableBuilder<double>(
+                valueListenable: _progressNotifier,
+                builder: (context, value, _) => LinearProgressIndicator(
+                  value: _showRaw ? null : value,
+                  minHeight: 2,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           IconButton(
@@ -335,6 +428,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+          IconButton(
+            tooltip: '文内搜索',
+            icon: const Icon(Icons.search),
+            onPressed: _toggleSearchBar,
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: '更多',
@@ -748,7 +846,26 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ],
     );
     final children = <Widget>[
-      _buildBreadcrumb(theme),
+      Row(
+        children: [
+          Expanded(child: _buildBreadcrumb(theme)),
+          if (_readingMinutes > 0) ...[
+            const SizedBox(width: 8),
+            Icon(
+              Icons.schedule_outlined,
+              size: 13,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 2),
+            Text(
+              '约 $_readingMinutes 分钟',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
       const SizedBox(height: 4),
     ];
     var anchorIndex = 0;
@@ -776,6 +893,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 controller: _scrollController,
                 child: _HeadingMarker(
                   key: _headingKeys[anchorIndex],
+                  flash: _flashHeading,
                   child: widgets[idx],
                 ),
               );
@@ -891,12 +1009,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 代码块配置：flutter_highlight 语法高亮（跟随主题），右上角一键复制。
   PreConfig _preConfig(ThemeData theme, bool isDark) {
     final highlightTheme = isDark ? atomOneDarkTheme : githubTheme;
+    final prefs = AppPrefs.instance;
     return PreConfig(
       padding: EdgeInsets.zero,
       decoration: const BoxDecoration(),
       builder: (code, language) {
         // 与 HighlightView 的主题背景同色，块元素化占满视口宽度
         final bg = highlightTheme['root']?.backgroundColor;
+        final codeText = code.trimRight();
+        final lineCount = codeText.split('\n').length;
+        final foldThreshold = prefs?.codeFoldThreshold ?? 30;
         return Container(
           width: double.infinity,
           color: bg,
@@ -904,42 +1026,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             bottomPadding: 6,
             child: Stack(
               children: [
-                HighlightView(
-                  // markdown 解析出的 content 带尾随换行/空行，
-                  // 不裁掉会渲染成大段底部空白
-                  code.trimRight(),
-                  language: language,
-                  theme: highlightTheme,
-                  padding: const EdgeInsets.only(
-                      top: 28, left: 12, right: 12, bottom: 4),
-                  textStyle: currentCodeFontStyle().copyWith(
-                    fontSize: 13,
-                    height: 1.5,
-                  ),
-                ),
-                if (language.isNotEmpty)
-                  Positioned(
-                    top: 4,
-                    left: 12,
-                    child: Text(
-                      language,
-                      style: currentCodeFontStyle().copyWith(
-                        fontSize: 11,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                if (lineCount > foldThreshold)
+                  _FoldableCode(
+                    code: codeText,
+                    language: language,
+                    theme: highlightTheme,
+                    foldThreshold: foldThreshold,
+                    lineNumbers: prefs?.codeLineNumbers ?? true,
                   )
                 else
-                  Positioned(
-                    top: 4,
-                    left: 12,
-                    child: Text(
-                      'text',
-                      style: currentCodeFontStyle().copyWith(
-                        fontSize: 11,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                  _LineNumberedCode(
+                    code: codeText,
+                    language: language,
+                    theme: highlightTheme,
+                    lineNumbers: prefs?.codeLineNumbers ?? true,
                   ),
                 Positioned(
                   top: 4,
@@ -952,6 +1052,228 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         );
       },
     );
+  }
+
+  /// 文内搜索：展开/收起搜索栏。
+  void _toggleSearchBar() {
+    setState(() {
+      _searchBarVisible = !_searchBarVisible;
+      if (!_searchBarVisible) {
+        _searchController.clear();
+        _searchHitLines = [];
+        _rawSearchHitLines = [];
+        _searchCurrent = -1;
+        _stopFlash();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _searchFocus.requestFocus();
+        });
+      }
+    });
+  }
+
+  /// 执行搜索：渲染视图按行匹配 _bodyForSearch，Raw 按 _rawSource。
+  /// 命中行映射到所属标题锚点（渲染视图）；Raw 直接按行跳转。
+  void _runSearch(String query) {
+    final q = query.trim().toLowerCase();
+    _searchHitLines = [];
+    _rawSearchHitLines = [];
+    _searchCurrent = -1;
+    if (q.isEmpty) {
+      setState(() {});
+      return;
+    }
+    if (_showRaw) {
+      final src = (_rawSource ?? '').split('\n');
+      for (var i = 0; i < src.length; i++) {
+        if (src[i].toLowerCase().contains(q)) _rawSearchHitLines.add(i);
+      }
+    } else {
+      final body = _bodyForSearch.split('\n');
+      for (var i = 0; i < body.length; i++) {
+        if (body[i].toLowerCase().contains(q)) _searchHitLines.add(i);
+      }
+    }
+    setState(() {});
+    if ((_showRaw ? _rawSearchHitLines : _searchHitLines).isNotEmpty) {
+      _gotoSearchHit(0);
+    }
+  }
+
+  /// 跳到第 [index] 个命中（循环）。
+  void _gotoSearchHit(int index) {
+    final hits = _showRaw ? _rawSearchHitLines : _searchHitLines;
+    if (hits.isEmpty) return;
+    _searchCurrent = index % hits.length;
+    final line = hits[_searchCurrent];
+    if (_showRaw) {
+      // Raw：TextPainter 量前缀行高的方式开销大且无锚点，
+      // 简化为按行序比例定位（raw 是源码查看场景，够用）
+      if (!_scrollController.hasClients) return;
+      final total = (_rawSource ?? '').split('\n').length;
+      final max = _scrollController.position.maxScrollExtent;
+      _scrollController.animateTo(
+        (line / (total == 1 ? 1 : total - 1) * max)
+            .clamp(0.0, max),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    } else {
+      // 渲染视图：命中行所属标题锚点定位 + 标题闪烁提示
+      final headingIdx = _headingIndexForLine(line);
+      if (headingIdx >= 0 &&
+          headingIdx < _headingKeys.length &&
+          _headingKeys[headingIdx].currentContext != null) {
+        Scrollable.ensureVisible(
+          _headingKeys[headingIdx].currentContext!,
+          duration: const Duration(milliseconds: 250),
+          alignment: 0.08,
+        );
+        _flashHeadingAt(headingIdx);
+      }
+    }
+    setState(() {});
+  }
+
+  /// 命中行所属标题（_toc 按 line 升序，取 line <= 命中行的最后一个）。
+  int _headingIndexForLine(int line) {
+    var found = -1;
+    for (var i = 0; i < _toc.length; i++) {
+      if (_toc[i].line <= line) {
+        found = i;
+      } else {
+        break;
+      }
+    }
+    return found;
+  }
+
+  /// 标题闪烁：短暂高亮 1.2s，提示命中章节位置。
+  void _flashHeadingAt(int index) {
+    _flashTimer?.cancel();
+    _flashHeading.value = index;
+    _flashTimer = Timer(const Duration(milliseconds: 1200), () {
+      _flashHeading.value = -1;
+    });
+  }
+
+  void _stopFlash() {
+    _flashTimer?.cancel();
+    _flashHeading.value = -1;
+  }
+
+  /// 文内搜索栏：输入即搜，显示命中计数，上/下条循环跳转。
+  Widget _buildSearchBar(ThemeData theme) {
+    final hits = _showRaw ? _rawSearchHitLines : _searchHitLines;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      color: theme.colorScheme.surfaceContainerHighest.withAlpha(60),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocus,
+              style: theme.textTheme.bodyMedium,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: '搜索本文…',
+                border: InputBorder.none,
+              ),
+              onChanged: _runSearch,
+            ),
+          ),
+          Text(
+            hits.isEmpty ? '无结果' : '${_searchCurrent + 1}/${hits.length}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: '上一处',
+            icon: const Icon(Icons.keyboard_arrow_up),
+            onPressed: hits.isEmpty
+                ? null
+                : () => _gotoSearchHit(_searchCurrent - 1),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: '下一处',
+            icon: const Icon(Icons.keyboard_arrow_down),
+            onPressed: hits.isEmpty
+                ? null
+                : () => _gotoSearchHit(_searchCurrent + 1),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: '关闭搜索',
+            icon: const Icon(Icons.close),
+            onPressed: _toggleSearchBar,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Raw 视图文本：按行构建 span，命中行高亮（当前命中行更醒目），
+  /// 行内命中的关键词染色。
+  TextSpan _rawSearchSpans(ThemeData theme) {
+    final raw = _rawSource ?? '';
+    final q = _searchController.text.trim().toLowerCase();
+    final base = currentCodeFontStyle().copyWith(
+      fontSize: _fontSizes[_fontIndex],
+      height: 1.6,
+      color: theme.colorScheme.onSurface,
+    );
+    if (q.isEmpty || _rawSearchHitLines.isEmpty) {
+      return TextSpan(text: raw, style: base);
+    }
+    final hitSet = _rawSearchHitLines.toSet();
+    final currentLine =
+        _searchCurrent >= 0 && _searchCurrent < _rawSearchHitLines.length
+            ? _rawSearchHitLines[_searchCurrent]
+            : -1;
+    final lines = raw.split('\n');
+    final spans = <TextSpan>[];
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final isCurrent = i == currentLine;
+      final isHit = hitSet.contains(i);
+      if (!isHit) {
+        spans.add(TextSpan(text: '$line\n', style: base));
+        continue;
+      }
+      // 行内逐段切分，命中词加背景色
+      final bg = isCurrent
+          ? theme.colorScheme.primary.withAlpha(90)
+          : theme.colorScheme.primary.withAlpha(36);
+      final lower = line.toLowerCase();
+      final children = <TextSpan>[];
+      var start = 0;
+      while (true) {
+        final idx = lower.indexOf(q, start);
+        if (idx < 0) {
+          children.add(TextSpan(text: line.substring(start)));
+          break;
+        }
+        if (idx > start) {
+          children.add(TextSpan(text: line.substring(start, idx)));
+        }
+        children.add(TextSpan(
+          text: line.substring(idx, idx + q.length),
+          style: TextStyle(backgroundColor: bg),
+        ));
+        start = idx + q.length;
+      }
+      spans.add(TextSpan(
+        text: '',
+        style: base,
+        children: [...children, TextSpan(text: '\n')],
+      ));
+    }
+    return TextSpan(style: base, children: spans);
   }
 
   /// 链接点击：外部链接浏览器打开；#锚点页内跳转；
@@ -1187,14 +1509,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-              child: SelectableText(
-                raw,
-                style: currentCodeFontStyle().copyWith(
-                  // 跟随字号 FAB，与 markdown 视图共用同一档位
-                  fontSize: _fontSizes[_fontIndex],
-                  height: 1.6,
-                  color: theme.colorScheme.onSurface,
-                ),
+              child: SelectableText.rich(
+                _rawSearchSpans(theme),
               ),
             ),
           ),
@@ -1217,7 +1533,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           // 浅色垫底：透明 PNG/SVG 图表按白底设计，深色主题下不可读
-          child: buildRepoImage(src, baseDir: _noteDir, backdrop: true),
+          child: Hero(
+            tag: 'img-$src',
+            child: buildRepoImage(src, baseDir: _noteDir, backdrop: true),
+          ),
         ),
       ),
     );
@@ -1302,17 +1621,57 @@ class _H3Config extends H3Config {
 /// 标题标记：给 markdown_widget 生成的标题挂 GlobalKey，
 /// 供“当前章节”定位使用（不影响 AutoScrollTag 的锚点跳转）。
 class _HeadingMarker extends StatefulWidget {
-  const _HeadingMarker({super.key, required this.child});
+  const _HeadingMarker({
+    super.key,
+    required this.child,
+    this.flash,
+  });
 
   final Widget child;
+
+  /// 非 null 时：值等于本标题索引期间显示高亮背景（搜索定位提示）。
+  final ValueListenable<int>? flash;
 
   @override
   State<_HeadingMarker> createState() => _HeadingMarkerState();
 }
 
 class _HeadingMarkerState extends State<_HeadingMarker> {
+  int _index = -1;
+
   @override
-  Widget build(BuildContext context) => widget.child;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 挂载时记住自己是第几个标题（_headingKeys 与 _toc 同序）
+    final page =
+        context.findAncestorStateOfType<_MarkdownViewerPageState>();
+    if (page != null && _index < 0 && widget.key is GlobalKey) {
+      _index = page._headingKeys.indexOf(widget.key as GlobalKey);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final flash = widget.flash;
+    if (flash == null || _index < 0) return widget.child;
+    return ValueListenableBuilder<int>(
+      valueListenable: flash,
+      builder: (context, active, _) {
+        final theme = Theme.of(context);
+        final highlighted = active == _index;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: highlighted
+                ? theme.colorScheme.primary.withAlpha(46)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: widget.child,
+        );
+      },
+    );
+  }
 }
 
 /// 文末导航：同目录内切换上一篇/下一篇。
@@ -1353,6 +1712,139 @@ class _PrevNextNav extends StatelessWidget {
               next?.fileName ?? '已是最后一篇',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 带语言标签的代码高亮视图（行号列在外层，横向滚动时不随内容移动）。
+class _LineNumberedCode extends StatelessWidget {
+  const _LineNumberedCode({
+    required this.code,
+    required this.language,
+    required this.theme,
+    required this.lineNumbers,
+  });
+
+  final String code;
+  final String language;
+  final Map<String, TextStyle> theme;
+  final bool lineNumbers;
+
+  @override
+  Widget build(BuildContext context) {
+    final lineCount = code.split('\n').length;
+    final gutter = lineNumbers
+        ? Container(
+            // 行号列固定：不放进横向滚动区
+            padding: const EdgeInsets.only(top: 28, left: 8, right: 4),
+            alignment: Alignment.topRight,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (var i = 1; i <= lineCount; i++)
+                  Text(
+                    '$i',
+                    style: currentCodeFontStyle().copyWith(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withAlpha(110),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        : null;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ?gutter,
+        Expanded(
+          child: HighlightView(
+            code,
+            language: language,
+            theme: theme,
+            padding: const EdgeInsets.only(
+                top: 28, left: 12, right: 12, bottom: 4),
+            textStyle: currentCodeFontStyle().copyWith(
+              fontSize: 13,
+              height: 1.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 超过阈值的代码块：默认折叠显示前 N 行，点击展开/收起。
+class _FoldableCode extends StatefulWidget {
+  const _FoldableCode({
+    required this.code,
+    required this.language,
+    required this.theme,
+    required this.foldThreshold,
+    required this.lineNumbers,
+  });
+
+  final String code;
+  final String language;
+  final Map<String, TextStyle> theme;
+  final int foldThreshold;
+  final bool lineNumbers;
+
+  @override
+  State<_FoldableCode> createState() => _FoldableCodeState();
+}
+
+class _FoldableCodeState extends State<_FoldableCode> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = widget.code.split('\n');
+    final total = lines.length;
+    final visible = _expanded || total <= widget.foldThreshold;
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _LineNumberedCode(
+          code: visible
+              ? widget.code
+              : lines.take(widget.foldThreshold).join('\n'),
+          language: widget.language,
+          theme: widget.theme,
+          lineNumbers: widget.lineNumbers,
+        ),
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _expanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  _expanded ? '收起' : '展开全部 $total 行',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

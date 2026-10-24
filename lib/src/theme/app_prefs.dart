@@ -15,6 +15,8 @@ class AppPrefs extends ChangeNotifier {
     this._defaultOwner,
     this._codeFont,
     this._keepScreenOn,
+    this._codeLineNumbers,
+    this._codeFoldThreshold,
   );
 
   static const _modeKey = 'themeMode';
@@ -23,6 +25,8 @@ class AppPrefs extends ChangeNotifier {
   static const _ownerKey = 'defaultOwner';
   static const _codeFontKey = 'codeFont';
   static const _keepScreenOnKey = 'keepScreenOn';
+  static const _codeLineNumbersKey = 'codeLineNumbers';
+  static const _codeFoldThresholdKey = 'codeFoldThreshold';
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
@@ -39,6 +43,12 @@ class AppPrefs extends ChangeNotifier {
   bool _keepScreenOn;
   bool get keepScreenOn => _keepScreenOn;
 
+  bool _codeLineNumbers;
+  bool get codeLineNumbers => _codeLineNumbers;
+
+  int _codeFoldThreshold;
+  int get codeFoldThreshold => _codeFoldThreshold;
+
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
 
@@ -51,6 +61,8 @@ class AppPrefs extends ChangeNotifier {
     var owner = '';
     var codeFont = kCodeFontJetBrains;
     var keepScreenOn = false;
+    var codeLineNumbers = true;
+    var codeFoldThreshold = 30;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -68,10 +80,20 @@ class AppPrefs extends ChangeNotifier {
           ? sp.getString(_codeFontKey)!
           : kCodeFontJetBrains;
       keepScreenOn = sp.getBool(_keepScreenOnKey) ?? false;
+      codeLineNumbers = sp.getBool(_codeLineNumbersKey) ?? true;
+      codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
-    return _instance = AppPrefs._(mode, platform, owner, codeFont, keepScreenOn);
+    return _instance = AppPrefs._(
+      mode,
+      platform,
+      owner,
+      codeFont,
+      keepScreenOn,
+      codeLineNumbers,
+      codeFoldThreshold.clamp(10, 200),
+    );
   }
 
   Future<void> setMode(ThemeMode m) async {
@@ -111,6 +133,27 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_keepScreenOnKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setCodeLineNumbers(bool v) async {
+    if (v == _codeLineNumbers) return;
+    _codeLineNumbers = v;
+    notifyListeners();
+    await _save(_codeLineNumbersKey, v ? '1' : '0');
+  }
+
+  Future<void> setCodeFoldThreshold(int lines) async {
+    final value = lines.clamp(10, 200);
+    if (value == _codeFoldThreshold) return;
+    _codeFoldThreshold = value;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setInt(_codeFoldThresholdKey, value);
     } on Object {
       // 保存失败不影响本次会话
     }

@@ -100,6 +100,38 @@ class SettingsPage extends StatelessWidget {
               onChanged: (v) => prefs.setKeepScreenOn(v),
             ),
           ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.format_list_numbered_outlined),
+              title: const Text('代码行号'),
+              subtitle: const Text('代码块左侧显示行号列'),
+              value: prefs.codeLineNumbers,
+              onChanged: (v) => prefs.setCodeLineNumbers(v),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.unfold_more_outlined),
+              title: const Text('代码折叠阈值'),
+              subtitle: Text('超过 ${prefs.codeFoldThreshold} 行的代码块默认折叠'),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.codeFoldThreshold.toDouble(),
+                  min: 10,
+                  max: 200,
+                  divisions: 19, // 10 步进
+                  label: '${prefs.codeFoldThreshold}',
+                  onChanged: (v) =>
+                      prefs.setCodeFoldThreshold(v.round()),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           Text('应用', style: theme.textTheme.titleMedium),
           ListTile(

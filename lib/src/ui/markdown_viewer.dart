@@ -1018,6 +1018,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           language: language,
           theme: highlightTheme,
           lineNumbers: prefs?.codeLineNumbers ?? true,
+          foldEnabled: prefs?.codeFoldEnabled ?? true,
           foldThreshold: prefs?.codeFoldThreshold ?? 30,
         );
       },
@@ -1467,6 +1468,7 @@ class _CodeBlockView extends StatefulWidget {
     required this.language,
     required this.theme,
     required this.lineNumbers,
+    required this.foldEnabled,
     required this.foldThreshold,
   });
 
@@ -1474,6 +1476,7 @@ class _CodeBlockView extends StatefulWidget {
   final String language;
   final Map<String, TextStyle> theme;
   final bool lineNumbers;
+  final bool foldEnabled;
   final int foldThreshold;
 
   @override
@@ -1505,7 +1508,7 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
         }
         final lines = widget.code.split('\n');
         final total = lines.length;
-        final foldable = total > widget.foldThreshold;
+        final foldable = widget.foldEnabled && total > widget.foldThreshold;
         final folded = foldable && !_expanded;
         final visibleCode =
             folded ? lines.take(widget.foldThreshold).join('\n') : widget.code;

@@ -17,6 +17,7 @@ class AppPrefs extends ChangeNotifier {
     this._keepScreenOn,
     this._codeLineNumbers,
     this._codeFoldThreshold,
+    this._codeFoldEnabled,
   );
 
   static const _modeKey = 'themeMode';
@@ -27,6 +28,7 @@ class AppPrefs extends ChangeNotifier {
   static const _keepScreenOnKey = 'keepScreenOn';
   static const _codeLineNumbersKey = 'codeLineNumbers';
   static const _codeFoldThresholdKey = 'codeFoldThreshold';
+  static const _codeFoldEnabledKey = 'codeFoldEnabled';
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
@@ -51,6 +53,11 @@ class AppPrefs extends ChangeNotifier {
   int? _codeFoldThreshold;
   int get codeFoldThreshold => _codeFoldThreshold ?? 30;
 
+  // 同 codeLineNumbers：热重载会保留无此参数的旧实例（字段为 null），
+  // getter 兜底默认值，set 前用 getter 比较
+  bool? _codeFoldEnabled;
+  bool get codeFoldEnabled => _codeFoldEnabled ?? true;
+
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
 
@@ -65,6 +72,7 @@ class AppPrefs extends ChangeNotifier {
     var keepScreenOn = false;
     var codeLineNumbers = true;
     var codeFoldThreshold = 30;
+    var codeFoldEnabled = true;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -90,6 +98,7 @@ class AppPrefs extends ChangeNotifier {
         _ => true,
       };
       codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
+      codeFoldEnabled = sp.getBool(_codeFoldEnabledKey) ?? true;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -101,6 +110,7 @@ class AppPrefs extends ChangeNotifier {
       keepScreenOn,
       codeLineNumbers,
       codeFoldThreshold.clamp(10, 200),
+      codeFoldEnabled,
     );
   }
 
@@ -168,6 +178,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setInt(_codeFoldThresholdKey, value);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setCodeFoldEnabled(bool v) async {
+    if (v == codeFoldEnabled) return;
+    _codeFoldEnabled = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_codeFoldEnabledKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

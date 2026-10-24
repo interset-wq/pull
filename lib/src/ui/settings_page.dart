@@ -113,6 +113,17 @@ class SettingsPage extends StatelessWidget {
           ),
           AnimatedBuilder(
             animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.unfold_more_outlined),
+              title: const Text('长代码块折叠'),
+              subtitle: const Text('超过阈值的代码块默认收起，点击展开'),
+              value: prefs.codeFoldEnabled,
+              onChanged: (v) => prefs.setCodeFoldEnabled(v),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
             builder: (context, _) => ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.unfold_more_outlined),

@@ -56,5 +56,19 @@ void main() {
       final toc = extractToc(md);
       expect(toc.map((e) => e.text), ['a', 'b', 'c']);
     });
+
+    test('setext 标题（=== H1 / --- H2）按 markdown_widget 口径识别', () {
+      const md = '大标题\n=====\n正文\n\n小标题\n---\n正文\n## atx\n';
+      final toc = extractToc(md);
+      expect(toc.map((e) => e.text), ['大标题', '小标题', 'atx']);
+      expect(toc.map((e) => e.level), [1, 2, 2]);
+      expect(toc.map((e) => e.line), [0, 4, 7]);
+    });
+
+    test('单独的 --- 与列表后的 --- 是分隔线不是 setext 标题', () {
+      const md = '- item\n---\n\n# 真标题\n';
+      final toc = extractToc(md);
+      expect(toc.map((e) => e.text), ['真标题']);
+    });
   });
 }

@@ -22,8 +22,15 @@ class TocEntry {
 
 final _fenceOpen = RegExp(r'^(`{3,}|~{3,})');
 final _heading = RegExp(r'^(#{1,6})\s+(.+?)\s*#*\s*$');
+final _setext1 = RegExp(r'^=+[ \t]*$');
+final _setext2 = RegExp(r'^-+[ \t]*$');
+final _notSetextBody = RegExp(r'^(?:[-*+]|\d+[.)])[ \t]|^>');
 
-/// 提取全部 ATX 标题（# 形式），保持出现顺序。
+/// 提取全部标题（ATX `#` 与 setext `===`/`---` 下划线两种形式），保持出现顺序。
+///
+/// setext 支持不是锦上添花：markdown_widget 挂锚点时按它自己识别出的
+/// 标题序列计数，若这里少算 setext 标题，锚点索引整体错位，TOC 跳转
+/// 就会落到错误的标题上。
 ///
 /// 围栏判定按 CommonMark，而不是「见 ``` 就翻转」：
 /// - 开栏的 info string 不能包含围栏字符本身（`` ```text``` `` 这类
@@ -35,6 +42,9 @@ List<TocEntry> extractToc(String markdown) {
   final entries = <TocEntry>[];
   var fenceChar = '';
   var fenceLen = 0;
+  // 上一段非空普通文本（setext 标题体），空行/围栏行/标题行会清掉
+  String? pendingText;
+  var pendingLine = -1;
   final lines = markdown.split('\n');
   for (var i = 0; i < lines.length; i++) {
     // trimRight 去掉 CRLF 的 '\r'（Windows 仓库常见），否则闭栏正则
@@ -49,6 +59,7 @@ List<TocEntry> extractToc(String markdown) {
         if (canOpen) {
           fenceChar = marker[0];
           fenceLen = marker.length;
+          pendingText = null;
           continue;
         }
       }
@@ -73,6 +84,32 @@ List<TocEntry> extractToc(String markdown) {
           line: i,
         ));
       }
+      pendingText = null;
+      continue;
+    }
+    // setext 下划线：前一行是非空普通文本时，=== 为 H1、--- 为 H2。
+    // 单独出现的 ---/=== 是分隔线，不构成标题。
+    if (trimmed.isNotEmpty && pendingText != null) {
+      final isSetext1 = _setext1.hasMatch(trimmed);
+      final isSetext2 = _setext2.hasMatch(trimmed);
+      if (isSetext1 || isSetext2) {
+        entries.add(TocEntry(
+          level: isSetext1 ? 1 : 2,
+          text: pendingText,
+          line: pendingLine,
+        ));
+        pendingText = null;
+        continue;
+      }
+    }
+    if (trimmed.isEmpty) {
+      pendingText = null;
+    } else if (_notSetextBody.hasMatch(trimmed)) {
+      // 列表项/引用行不构成 setext 标题体（CommonMark：其后 --- 是分隔线）
+      pendingText = null;
+    } else {
+      pendingText = trimmed;
+      pendingLine = i;
     }
   }
   return entries;

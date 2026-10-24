@@ -1495,7 +1495,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   /// 正文图片：统一加载（本地/网络），点击进入图片阅读器。
   Widget _buildImage(String url) {
-    final src = url.trim();
+    // markdown 包对链接目的地址做百分号编码（CommonMark 规范），中文
+    // 文件名到达此处已是编码串；图库列表/Hero 标签/本地解析都用原始
+    // 路径，入口统一解码对齐。
+    final src = decodeMarkdownUrl(url.trim());
     final index = _imageUrls.indexOf(src);
     return GestureDetector(
       onTap: () => _openGallery(index < 0 ? 0 : index),
@@ -1792,9 +1795,15 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                     child: Container(
                       alignment: Alignment.topRight,
                       padding: const EdgeInsets.only(right: 8),
-                      child: _LineNumberColumn(
-                        lineCount: gutterLines,
-                        color: theme.colorScheme.onSurfaceVariant.withAlpha(110),
+                      // 滚动容器裁剪：吸收缩放语境下与代码行的取整差，
+                      // 否则 Column 比外层高 1px 就报 overflow
+                      child: SingleChildScrollView(
+                        physics: const NeverScrollableScrollPhysics(),
+                        child: _LineNumberColumn(
+                          lineCount: gutterLines,
+                          color:
+                              theme.colorScheme.onSurfaceVariant.withAlpha(110),
+                        ),
                       ),
                     ),
                   ),

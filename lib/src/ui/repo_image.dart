@@ -23,7 +23,7 @@ Widget buildRepoImage(
     child = _NetworkImage(url: clean, fit: fit);
   } else {
     child = Image.file(
-      _resolveLocal(clean, baseDir),
+      resolveRepoFile(decodeMarkdownUrl(clean), baseDir),
       fit: fit,
       frameBuilder: _fadeIn,
       errorBuilder: (_, _, _) => const _ImageErrorBox(),
@@ -119,8 +119,20 @@ bool _looksLikeSvg(Uint8List bytes) {
   return head.contains('<svg') || head.contains('<?xml');
 }
 
+/// markdown 包按 CommonMark 规范对链接目的地址做百分号编码（中文文件名
+/// 变成 %E4%BB.. 之类），而本地文件按原始名存储，解析前必须还原。
+/// 已是普通路径（不含 %）原样返回；含字面 % 的非法编码解码失败也原样返回。
+String decodeMarkdownUrl(String src) {
+  if (!src.contains('%')) return src;
+  try {
+    return Uri.decodeFull(src);
+  } catch (_) {
+    return src;
+  }
+}
+
 /// 相对路径基于 baseDir 解析；绝对路径原样使用；归一化 ./ 与 ../。
-File _resolveLocal(String src, String baseDir) {
+File resolveRepoFile(String src, String baseDir) {
   final isAbsolute =
       src.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(src);
   final joined = isAbsolute
@@ -132,6 +144,9 @@ File _resolveLocal(String src, String baseDir) {
 
 String _normalize(String path) {
   final hasDrive = RegExp(r'^[A-Za-z]:').hasMatch(path);
+  // 以 / 开头的路径（Windows 上指当前盘符根）保留前导斜杠；
+  // 纯相对路径不能凭空加 /，否则会错误地指到盘符根目录。
+  final isRooted = path.startsWith('/') || path.startsWith('\\');
   final out = <String>[];
   for (final part in path.replaceAll('\\', '/').split('/')) {
     if (part.isEmpty || part == '.') continue;
@@ -142,8 +157,14 @@ String _normalize(String path) {
     out.add(part);
   }
   final joined = out.join('/');
-  return hasDrive ? joined : '/$joined';
+  if (!isRooted) return _toNative(joined);
+  return hasDrive ? _toNative(joined) : '/${_toNative(joined)}';
 }
+
+/// Windows 上统一为反斜杠，与 File/Directory 返回的路径风格一致，
+/// 便于调用方做路径相等比较；POSIX 原样。
+String _toNative(String path) =>
+    Platform.isWindows ? path.replaceAll('/', '\\') : path;
 
 class _ImageErrorBox extends StatelessWidget {
   const _ImageErrorBox({this.onRetry});

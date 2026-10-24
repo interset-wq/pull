@@ -204,6 +204,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   @override
   void initState() {
     super.initState();
+    // 同目录文章列表同步算好：footer 翻页条在 FutureBuilder 之外，
+    // 若等 _load 里赋值，没有 setState 触发它重建——pushReplacement
+    // 过来的新页面会停在空状态，翻页按钮消失
+    _loadSiblings();
     _content = _load();
     _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
     _scrollController.addListener(_onScroll);
@@ -323,7 +327,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
     body = MarkdownViewerPage.normalizeHtmlImages(body);
     _toc = extractToc(body);
-    _loadSiblings();
     _headingKeys
       ..clear()
       ..addAll(List.generate(_toc.length, (_) => GlobalKey()));

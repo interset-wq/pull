@@ -394,10 +394,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               if (_searchBarVisible) _buildSearchBar(theme),
               ValueListenableBuilder<double>(
                 valueListenable: _progressNotifier,
-                builder: (context, value, _) => LinearProgressIndicator(
-                  value: _showRaw ? null : value,
-                  minHeight: 2,
-                ),
+                builder: (context, value, _) => _showRaw
+                    // raw 无阅读进度可言；value:null 的 indeterminate
+                    // 形态是一条持续动画的横线，看着像在加载
+                    ? const SizedBox(height: 2)
+                    : LinearProgressIndicator(value: value, minHeight: 2),
               ),
             ],
           ),
@@ -439,7 +440,13 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             onSelected: (v) {
               switch (v) {
                 case 'raw':
-                  setState(() => _showRaw = !_showRaw);
+                  setState(() {
+                    _showRaw = !_showRaw;
+                    // 命中行/跳转逻辑随视图切换基准不同，用当前关键词重跑
+                    if (_searchController.text.isNotEmpty) {
+                      _runSearch(_searchController.text);
+                    }
+                  });
                 case 'font':
                   _showFontSheet();
               }
@@ -1092,15 +1099,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     } else {
       // 渲染视图：命中行所属标题锚点定位 + 标题闪烁提示
       final headingIdx = _headingIndexForLine(line);
-      if (headingIdx >= 0 &&
-          headingIdx < _headingKeys.length &&
-          _headingKeys[headingIdx].currentContext != null) {
+      final ctx = (headingIdx >= 0 && headingIdx < _headingKeys.length)
+          ? _headingKeys[headingIdx].currentContext
+          : null;
+      if (ctx != null) {
         Scrollable.ensureVisible(
-          _headingKeys[headingIdx].currentContext!,
+          ctx,
           duration: const Duration(milliseconds: 250),
           alignment: 0.08,
         );
         _flashHeadingAt(headingIdx);
+      } else if (_scrollController.hasClients) {
+        // 命中位于第一个标题之前（如 front-matter/引言）：兜底跳文首，
+        // 否则表现为「搜索不生效」
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
       }
     }
     setState(() {});

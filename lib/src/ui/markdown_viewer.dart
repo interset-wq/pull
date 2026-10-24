@@ -1216,7 +1216,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: buildRepoImage(src, baseDir: _noteDir),
+          // 浅色垫底：透明 PNG/SVG 图表按白底设计，深色主题下不可读
+          child: buildRepoImage(src, baseDir: _noteDir, backdrop: true),
         ),
       ),
     );

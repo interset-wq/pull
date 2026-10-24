@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
@@ -165,24 +164,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 最近一次进入视口的标题索引（进度记忆的锚点）。
   int _lastHeadingIndex = -1;
 
-  // ---- 文内搜索 ----
-  bool _searchBarVisible = false;
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocus = FocusNode();
-
-  /// 渲染视图命中行（基于 _bodyForSearch，与 _toc 行号同基准）。
-  List<int> _searchHitLines = [];
-
-  /// Raw 视图命中行（基于 _rawSource）。
-  List<int> _rawSearchHitLines = [];
-  int _searchCurrent = -1;
-
-  /// 渲染正文（front-matter/ipynb 转换后），搜索与 _toc 同源。
-  String _bodyForSearch = '';
-
-  /// 当前闪烁高亮的标题索引（搜索定位提示），-1 = 无。
-  final ValueNotifier<int> _flashHeading = ValueNotifier(-1);
-  Timer? _flashTimer;
+  // ---- 视图状态 ----
   List<String> _imageUrls = const [];
   String? _rawSource;
   bool _showRaw = false;
@@ -248,10 +230,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _scrollController.dispose();
     _currentSection.dispose();
     _progressNotifier.dispose();
-    _searchController.dispose();
-    _searchFocus.dispose();
-    _flashHeading.dispose();
-    _flashTimer?.cancel();
     super.dispose();
   }
 
@@ -350,7 +328,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ..clear()
       ..addAll(List.generate(_toc.length, (_) => GlobalKey()));
     _imageUrls = MarkdownViewerPage.collectImageUrls(body);
-    _bodyForSearch = body;
     _readingMinutes = _estimateReadingMinutes(body);
     return body;
   }
@@ -387,20 +364,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           overflow: TextOverflow.ellipsis,
         ),
         bottom: PreferredSize(
-          preferredSize: Size.fromHeight(_searchBarVisible ? 50 : 2),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_searchBarVisible) _buildSearchBar(theme),
-              ValueListenableBuilder<double>(
-                valueListenable: _progressNotifier,
-                builder: (context, value, _) => _showRaw
-                    // raw 无阅读进度可言；value:null 的 indeterminate
-                    // 形态是一条持续动画的横线，看着像在加载
-                    ? const SizedBox(height: 2)
-                    : LinearProgressIndicator(value: value, minHeight: 2),
-              ),
-            ],
+          preferredSize: const Size.fromHeight(2),
+          child: ValueListenableBuilder<double>(
+            valueListenable: _progressNotifier,
+            builder: (context, value, _) => _showRaw
+                // raw 无阅读进度可言；value:null 的 indeterminate
+                // 形态是一条持续动画的横线，看着像在加载
+                ? const SizedBox(height: 2)
+                : LinearProgressIndicator(value: value, minHeight: 2),
           ),
         ),
         actions: [
@@ -429,24 +400,13 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          IconButton(
-            tooltip: '文内搜索',
-            icon: const Icon(Icons.search),
-            onPressed: _toggleSearchBar,
-          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: '更多',
             onSelected: (v) {
               switch (v) {
                 case 'raw':
-                  setState(() {
-                    _showRaw = !_showRaw;
-                    // 命中行/跳转逻辑随视图切换基准不同，用当前关键词重跑
-                    if (_searchController.text.isNotEmpty) {
-                      _runSearch(_searchController.text);
-                    }
-                  });
+                  setState(() => _showRaw = !_showRaw);
                 case 'font':
                   _showFontSheet();
               }
@@ -900,7 +860,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 controller: _scrollController,
                 child: _HeadingMarker(
                   key: _headingKeys[anchorIndex],
-                  flash: _flashHeading,
                   child: widgets[idx],
                 ),
               );
@@ -1032,235 +991,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// 文内搜索：展开/收起搜索栏。
-  void _toggleSearchBar() {
-    setState(() {
-      _searchBarVisible = !_searchBarVisible;
-      if (!_searchBarVisible) {
-        _searchController.clear();
-        _searchHitLines = [];
-        _rawSearchHitLines = [];
-        _searchCurrent = -1;
-        _stopFlash();
-      } else {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _searchFocus.requestFocus();
-        });
-      }
-    });
-  }
-
-  /// 执行搜索：渲染视图按行匹配 _bodyForSearch，Raw 按 _rawSource。
-  /// 命中行映射到所属标题锚点（渲染视图）；Raw 直接按行跳转。
-  void _runSearch(String query) {
-    final q = query.trim().toLowerCase();
-    _searchHitLines = [];
-    _rawSearchHitLines = [];
-    _searchCurrent = -1;
-    if (q.isEmpty) {
-      setState(() {});
-      return;
-    }
-    if (_showRaw) {
-      final src = (_rawSource ?? '').split('\n');
-      for (var i = 0; i < src.length; i++) {
-        if (src[i].toLowerCase().contains(q)) _rawSearchHitLines.add(i);
-      }
-    } else {
-      final body = _bodyForSearch.split('\n');
-      for (var i = 0; i < body.length; i++) {
-        if (body[i].toLowerCase().contains(q)) _searchHitLines.add(i);
-      }
-    }
-    setState(() {});
-    if ((_showRaw ? _rawSearchHitLines : _searchHitLines).isNotEmpty) {
-      _gotoSearchHit(0);
-    }
-  }
-
-  /// 跳到第 [index] 个命中（循环）。
-  void _gotoSearchHit(int index) {
-    final hits = _showRaw ? _rawSearchHitLines : _searchHitLines;
-    if (hits.isEmpty) return;
-    _searchCurrent = index % hits.length;
-    final line = hits[_searchCurrent];
-    if (_showRaw) {
-      // Raw：TextPainter 量前缀行高的方式开销大且无锚点，
-      // 简化为按行序比例定位（raw 是源码查看场景，够用）
-      if (!_scrollController.hasClients) return;
-      final total = (_rawSource ?? '').split('\n').length;
-      final max = _scrollController.position.maxScrollExtent;
-      _scrollController.animateTo(
-        (line / (total == 1 ? 1 : total - 1) * max)
-            .clamp(0.0, max),
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    } else {
-      // 渲染视图：命中行所属标题锚点定位 + 标题闪烁提示
-      final headingIdx = _headingIndexForLine(line);
-      final ctx = (headingIdx >= 0 && headingIdx < _headingKeys.length)
-          ? _headingKeys[headingIdx].currentContext
-          : null;
-      if (ctx != null) {
-        Scrollable.ensureVisible(
-          ctx,
-          duration: const Duration(milliseconds: 250),
-          alignment: 0.08,
-        );
-        _flashHeadingAt(headingIdx);
-      } else if (_scrollController.hasClients) {
-        // 命中位于第一个标题之前（如 front-matter/引言）：兜底跳文首，
-        // 否则表现为「搜索不生效」
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    }
-    setState(() {});
-  }
-
-  /// 命中行所属标题（_toc 按 line 升序，取 line <= 命中行的最后一个）。
-  int _headingIndexForLine(int line) {
-    var found = -1;
-    for (var i = 0; i < _toc.length; i++) {
-      if (_toc[i].line <= line) {
-        found = i;
-      } else {
-        break;
-      }
-    }
-    return found;
-  }
-
-  /// 标题闪烁：短暂高亮 1.2s，提示命中章节位置。
-  void _flashHeadingAt(int index) {
-    _flashTimer?.cancel();
-    _flashHeading.value = index;
-    _flashTimer = Timer(const Duration(milliseconds: 1200), () {
-      _flashHeading.value = -1;
-    });
-  }
-
-  void _stopFlash() {
-    _flashTimer?.cancel();
-    _flashHeading.value = -1;
-  }
-
-  /// 文内搜索栏：输入即搜，显示命中计数，上/下条循环跳转。
-  Widget _buildSearchBar(ThemeData theme) {
-    final hits = _showRaw ? _rawSearchHitLines : _searchHitLines;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-      color: theme.colorScheme.surfaceContainerHighest.withAlpha(60),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocus,
-              style: theme.textTheme.bodyMedium,
-              decoration: const InputDecoration(
-                isDense: true,
-                hintText: '搜索本文…',
-                border: InputBorder.none,
-              ),
-              onChanged: _runSearch,
-            ),
-          ),
-          Text(
-            hits.isEmpty ? '无结果' : '${_searchCurrent + 1}/${hits.length}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(width: 4),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: '上一处',
-            icon: const Icon(Icons.keyboard_arrow_up),
-            onPressed: hits.isEmpty
-                ? null
-                : () => _gotoSearchHit(_searchCurrent - 1),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: '下一处',
-            icon: const Icon(Icons.keyboard_arrow_down),
-            onPressed: hits.isEmpty
-                ? null
-                : () => _gotoSearchHit(_searchCurrent + 1),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: '关闭搜索',
-            icon: const Icon(Icons.close),
-            onPressed: _toggleSearchBar,
-          ),
-        ],
+  /// Raw 视图文本：整段源码按当前代码字体渲染（无搜索高亮）。
+  TextSpan _rawSpans(ThemeData theme) {
+    final raw = _rawSource ?? '';
+    return TextSpan(
+      text: raw,
+      style: currentCodeFontStyle().copyWith(
+        fontSize: _fontSizes[_fontIndex],
+        height: 1.6,
+        color: theme.colorScheme.onSurface,
       ),
     );
-  }
-
-  /// Raw 视图文本：按行构建 span，命中行高亮（当前命中行更醒目），
-  /// 行内命中的关键词染色。
-  TextSpan _rawSearchSpans(ThemeData theme) {
-    final raw = _rawSource ?? '';
-    final q = _searchController.text.trim().toLowerCase();
-    final base = currentCodeFontStyle().copyWith(
-      fontSize: _fontSizes[_fontIndex],
-      height: 1.6,
-      color: theme.colorScheme.onSurface,
-    );
-    if (q.isEmpty || _rawSearchHitLines.isEmpty) {
-      return TextSpan(text: raw, style: base);
-    }
-    final hitSet = _rawSearchHitLines.toSet();
-    final currentLine =
-        _searchCurrent >= 0 && _searchCurrent < _rawSearchHitLines.length
-            ? _rawSearchHitLines[_searchCurrent]
-            : -1;
-    final lines = raw.split('\n');
-    final spans = <TextSpan>[];
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      final isCurrent = i == currentLine;
-      final isHit = hitSet.contains(i);
-      if (!isHit) {
-        spans.add(TextSpan(text: '$line\n', style: base));
-        continue;
-      }
-      // 行内逐段切分，命中词加背景色
-      final bg = isCurrent
-          ? theme.colorScheme.primary.withAlpha(90)
-          : theme.colorScheme.primary.withAlpha(36);
-      final lower = line.toLowerCase();
-      final children = <TextSpan>[];
-      var start = 0;
-      while (true) {
-        final idx = lower.indexOf(q, start);
-        if (idx < 0) {
-          children.add(TextSpan(text: line.substring(start)));
-          break;
-        }
-        if (idx > start) {
-          children.add(TextSpan(text: line.substring(start, idx)));
-        }
-        children.add(TextSpan(
-          text: line.substring(idx, idx + q.length),
-          style: TextStyle(backgroundColor: bg),
-        ));
-        start = idx + q.length;
-      }
-      spans.add(TextSpan(
-        text: '',
-        style: base,
-        children: [...children, TextSpan(text: '\n')],
-      ));
-    }
-    return TextSpan(style: base, children: spans);
   }
 
   /// 链接点击：外部链接浏览器打开；#锚点页内跳转；
@@ -1280,12 +1021,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     final anchor = hash < 0 ? null : url.substring(hash + 1);
     if (pathPart.isEmpty) {
       final idx = _headingIndexForAnchor(anchor!);
-      if (idx >= 0) {
-        _scrollController.scrollToIndex(
-          idx,
-          duration: const Duration(milliseconds: 300),
-        );
-      }
+      if (idx >= 0) _jumpToHeadingTop(idx);
       return;
     }
     final decoded = Uri.decodeComponent(pathPart);
@@ -1366,6 +1102,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     return -1;
   }
 
+  /// 跳到第 [index] 个标题并让标题贴住视口顶部（TOC / #锚点共用）。
+  /// scrollToIndex 的定位结果常落在屏幕底部；ensureVisible alignment 0
+  /// 把标题首行对齐到视口上沿，符合「目录点了去哪儿」的直觉。
+  void _jumpToHeadingTop(int index) {
+    if (index < 0 || index >= _headingKeys.length) return;
+    final ctx = _headingKeys[index].currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0,
+    );
+  }
+
   static String _slugify(String text) => text
       .toLowerCase()
       .replaceAll(RegExp(r'[^\p{L}\p{N}\s-]'), '')
@@ -1415,10 +1166,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    _scrollController.scrollToIndex(
-                      i,
-                      duration: const Duration(milliseconds: 300),
-                    );
+                    _jumpToHeadingTop(i);
                   },
                 );
               },
@@ -1497,7 +1245,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               child: SelectableText.rich(
-                _rawSearchSpans(theme),
+                _rawSpans(theme),
               ),
             ),
           ),
@@ -1611,56 +1359,18 @@ class _H3Config extends H3Config {
 /// 标题标记：给 markdown_widget 生成的标题挂 GlobalKey，
 /// 供“当前章节”定位使用（不影响 AutoScrollTag 的锚点跳转）。
 class _HeadingMarker extends StatefulWidget {
-  const _HeadingMarker({
-    super.key,
-    required this.child,
-    this.flash,
-  });
+  const _HeadingMarker({super.key, required this.child});
 
   final Widget child;
-
-  /// 非 null 时：值等于本标题索引期间显示高亮背景（搜索定位提示）。
-  final ValueListenable<int>? flash;
 
   @override
   State<_HeadingMarker> createState() => _HeadingMarkerState();
 }
 
 class _HeadingMarkerState extends State<_HeadingMarker> {
-  int _index = -1;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // 挂载时记住自己是第几个标题（_headingKeys 与 _toc 同序）
-    final page =
-        context.findAncestorStateOfType<_MarkdownViewerPageState>();
-    if (page != null && _index < 0 && widget.key is GlobalKey) {
-      _index = page._headingKeys.indexOf(widget.key as GlobalKey);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final flash = widget.flash;
-    if (flash == null || _index < 0) return widget.child;
-    return ValueListenableBuilder<int>(
-      valueListenable: flash,
-      builder: (context, active, _) {
-        final theme = Theme.of(context);
-        final highlighted = active == _index;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: highlighted
-                ? theme.colorScheme.primary.withAlpha(46)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: widget.child,
-        );
-      },
-    );
+    return widget.child;
   }
 }
 

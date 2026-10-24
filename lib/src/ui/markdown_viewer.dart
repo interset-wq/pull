@@ -249,7 +249,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _lastSectionUpdate = now;
       _updateCurrentSection();
     }
-    // 进度：恢复一次；之后按 800ms 节流保存比例位置
+    // 进度：询问一次是否跳回（不强转）；之后按 800ms 节流保存比例位置
     final max = _scrollController.position.maxScrollExtent;
     if (_restorePending) {
       _restorePending = false;
@@ -257,24 +257,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         widget.repoRoot,
         widget.note.relativePath,
       );
+      // 有些用户不需要跳回（比如想从头重读），只提示不强跳
       if (saved > 0.005 && max > 0) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_scrollController.hasClients) return;
-          // 标题锚点优先：字号/窗口变化导致布局高度漂移时，
-          // 标题位置不受影响，比纯比例恢复更准
-          if (headingIdx != null &&
-              headingIdx >= 0 &&
-              headingIdx < _headingKeys.length &&
-              _headingKeys[headingIdx].currentContext != null) {
-            Scrollable.ensureVisible(
-              _headingKeys[headingIdx].currentContext!,
-              duration: const Duration(milliseconds: 1),
-            );
-          } else {
-            _scrollController
-                .jumpTo(saved * _scrollController.position.maxScrollExtent);
-          }
-        });
+        _offerProgressRestore(saved, headingIdx);
       }
       return;
     }
@@ -288,6 +273,44 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         _lastHeadingIndex,
       );
     }
+  }
+
+  /// 有历史阅读进度时轻提示「是否跳回上次位置」，用户不点则从开头读。
+  void _offerProgressRestore(double saved, int? headingIdx) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: const Text('上次读到此处'),
+          action: SnackBarAction(
+            label: '跳到上次位置',
+            onPressed: () {
+              if (!_scrollController.hasClients) return;
+              // 标题锚点优先：字号/窗口变化导致布局高度漂移时，
+              // 标题位置不受影响，比纯比例恢复更准
+              if (headingIdx != null &&
+                  headingIdx >= 0 &&
+                  headingIdx < _headingKeys.length &&
+                  _headingKeys[headingIdx].currentContext != null) {
+                Scrollable.ensureVisible(
+                  _headingKeys[headingIdx].currentContext!,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              } else {
+                _scrollController.animateTo(
+                  (saved * _scrollController.position.maxScrollExtent)
+                      .clamp(0.0, _scrollController.position.maxScrollExtent),
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              }
+            },
+          ),
+        ),
+      );
   }
 
   /// 当前章节 = 最后一个已进入视口顶部的标题。

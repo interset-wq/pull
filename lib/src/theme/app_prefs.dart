@@ -82,7 +82,13 @@ class AppPrefs extends ChangeNotifier {
           ? sp.getString(_codeFontKey)!
           : kCodeFontJetBrains;
       keepScreenOn = sp.getBool(_keepScreenOnKey) ?? false;
-      codeLineNumbers = sp.getBool(_codeLineNumbersKey) ?? true;
+      // 旧版本曾用 setString 存 '1'/'0'，getBool 会抛类型异常被吞掉
+      // 回退默认——兼容两种存量形态
+      codeLineNumbers = switch (sp.get(_codeLineNumbersKey)) {
+        final bool b => b,
+        final String s => s != '0',
+        _ => true,
+      };
       codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
@@ -144,7 +150,13 @@ class AppPrefs extends ChangeNotifier {
     if (v == codeLineNumbers) return;
     _codeLineNumbers = v;
     notifyListeners();
-    await _save(_codeLineNumbersKey, v ? '1' : '0');
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_codeLineNumbersKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
   }
 
   Future<void> setCodeFoldThreshold(int lines) async {

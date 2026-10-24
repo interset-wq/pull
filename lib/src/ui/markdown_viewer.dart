@@ -1014,41 +1014,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       padding: EdgeInsets.zero,
       decoration: const BoxDecoration(),
       builder: (code, language) {
-        // 与 HighlightView 的主题背景同色，块元素化占满视口宽度
-        final bg = highlightTheme['root']?.backgroundColor;
-        final codeText = code.trimRight();
-        final lineCount = codeText.split('\n').length;
-        final foldThreshold = prefs?.codeFoldThreshold ?? 30;
-        return Container(
-          width: double.infinity,
-          color: bg,
-          child: HScrollbar(
-            bottomPadding: 6,
-            child: Stack(
-              children: [
-                if (lineCount > foldThreshold)
-                  _FoldableCode(
-                    code: codeText,
-                    language: language,
-                    theme: highlightTheme,
-                    foldThreshold: foldThreshold,
-                    lineNumbers: prefs?.codeLineNumbers ?? true,
-                  )
-                else
-                  _LineNumberedCode(
-                    code: codeText,
-                    language: language,
-                    theme: highlightTheme,
-                    lineNumbers: prefs?.codeLineNumbers ?? true,
-                  ),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: CopyButton(code: code),
-                ),
-              ],
-            ),
-          ),
+        return _CodeBlockView(
+          code: code.trimRight(),
+          language: language,
+          theme: highlightTheme,
+          lineNumbers: prefs?.codeLineNumbers ?? true,
+          foldThreshold: prefs?.codeFoldThreshold ?? 30,
         );
       },
     );
@@ -1720,134 +1691,172 @@ class _PrevNextNav extends StatelessWidget {
   }
 }
 
-/// 带语言标签的代码高亮视图（行号列在外层，横向滚动时不随内容移动）。
-class _LineNumberedCode extends StatelessWidget {
-  const _LineNumberedCode({
+/// 代码块视图：约束自适应。
+/// markdown_widget 把 builder 结果包进 WidgetSpan；正常块级语境下宽度
+/// 有界，但代码块若再被包进横向滚动容器（或表格等嵌套语境）就会以
+/// 无界宽度布局——Row+Expanded、Column(stretch)、width:double.infinity
+/// 在该路径下全部崩溃（C6 案例文件黑屏的根因）。
+/// 因此：横滚区里只放收缩安全的 HighlightView；行号列、语言标签、
+/// 复制按钮、折叠开关都在有界外层叠加；LayoutBuilder 兜底真无界语境
+/// （退化为纯高亮文本）。
+class _CodeBlockView extends StatefulWidget {
+  const _CodeBlockView({
     required this.code,
     required this.language,
     required this.theme,
     required this.lineNumbers,
+    required this.foldThreshold,
   });
 
   final String code;
   final String language;
   final Map<String, TextStyle> theme;
   final bool lineNumbers;
+  final int foldThreshold;
+
+  @override
+  State<_CodeBlockView> createState() => _CodeBlockViewState();
+}
+
+class _CodeBlockViewState extends State<_CodeBlockView> {
+  bool _expanded = false;
+
+  TextStyle get _codeStyle => currentCodeFontStyle().copyWith(
+        fontSize: 13,
+        height: 1.5,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final lineCount = code.split('\n').length;
-    final gutter = lineNumbers
-        ? Container(
-            // 行号列固定：不放进横向滚动区
-            padding: const EdgeInsets.only(top: 28, left: 8, right: 4),
-            alignment: Alignment.topRight,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 真无界语境（表格内嵌等）：退化为纯高亮文本，收缩布局不崩
+        if (!constraints.maxWidth.isFinite) {
+          return HighlightView(
+            widget.code,
+            language: widget.language,
+            theme: widget.theme,
+            padding: const EdgeInsets.only(top: 28, left: 12, right: 12, bottom: 4),
+            textStyle: _codeStyle,
+          );
+        }
+        final lines = widget.code.split('\n');
+        final total = lines.length;
+        final foldable = total > widget.foldThreshold;
+        final folded = foldable && !_expanded;
+        final visibleCode =
+            folded ? lines.take(widget.foldThreshold).join('\n') : widget.code;
+        final gutterLines = folded ? widget.foldThreshold : total;
+        final label = widget.language.isNotEmpty ? widget.language : 'text';
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Stack(
               children: [
-                for (var i = 1; i <= lineCount; i++)
-                  Text(
-                    '$i',
+                // 横滚区只放 HighlightView：无界宽度下收缩安全
+                HScrollbar(
+                  bottomPadding: 6,
+                  child: HighlightView(
+                    visibleCode,
+                    language: widget.language,
+                    theme: widget.theme,
+                    padding: EdgeInsets.only(
+                      top: 28,
+                      left: widget.lineNumbers ? 52 : 12,
+                      right: 12,
+                      bottom: 4,
+                    ),
+                    textStyle: _codeStyle,
+                  ),
+                ),
+                // 语言标签：固定不随代码横滚
+                Positioned(
+                  top: 4,
+                  left: 12,
+                  child: Text(
+                    label,
                     style: currentCodeFontStyle().copyWith(
-                      fontSize: 13,
-                      height: 1.5,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurfaceVariant
-                          .withAlpha(110),
+                      fontSize: 11,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ),
+                // 行号列：固定不随代码横滚，与代码行同字号同行高对齐
+                if (widget.lineNumbers)
+                  Positioned(
+                    top: 28,
+                    left: 0,
+                    width: 44,
+                    bottom: 4,
+                    child: Container(
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _LineNumberColumn(
+                        lineCount: gutterLines,
+                        color: theme.colorScheme.onSurfaceVariant.withAlpha(110),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: CopyButton(code: widget.code),
+                ),
               ],
             ),
-          )
-        : null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ?gutter,
-        Expanded(
-          child: HighlightView(
-            code,
-            language: language,
-            theme: theme,
-            padding: const EdgeInsets.only(
-                top: 28, left: 12, right: 12, bottom: 4),
-            textStyle: currentCodeFontStyle().copyWith(
-              fontSize: 13,
-              height: 1.5,
-            ),
-          ),
-        ),
-      ],
+            if (foldable)
+              InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 16,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _expanded ? '收起' : '展开全部 $total 行',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
 
-/// 超过阈值的代码块：默认折叠显示前 N 行，点击展开/收起。
-class _FoldableCode extends StatefulWidget {
-  const _FoldableCode({
-    required this.code,
-    required this.language,
-    required this.theme,
-    required this.foldThreshold,
-    required this.lineNumbers,
-  });
+/// 行号列：与代码同字号同行高，保证每行行号与代码行对齐。
+class _LineNumberColumn extends StatelessWidget {
+  const _LineNumberColumn({required this.lineCount, required this.color});
 
-  final String code;
-  final String language;
-  final Map<String, TextStyle> theme;
-  final int foldThreshold;
-  final bool lineNumbers;
-
-  @override
-  State<_FoldableCode> createState() => _FoldableCodeState();
-}
-
-class _FoldableCodeState extends State<_FoldableCode> {
-  bool _expanded = false;
+  final int lineCount;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final lines = widget.code.split('\n');
-    final total = lines.length;
-    final visible = _expanded || total <= widget.foldThreshold;
-    final theme = Theme.of(context);
+    final style = currentCodeFontStyle().copyWith(
+      fontSize: 13,
+      height: 1.5,
+      color: color,
+    );
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        _LineNumberedCode(
-          code: visible
-              ? widget.code
-              : lines.take(widget.foldThreshold).join('\n'),
-          language: widget.language,
-          theme: widget.theme,
-          lineNumbers: widget.lineNumbers,
-        ),
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _expanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 16,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _expanded ? '收起' : '展开全部 $total 行',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        for (var i = 1; i <= lineCount; i++)
+          Text('$i', style: style, overflow: TextOverflow.clip),
       ],
     );
   }

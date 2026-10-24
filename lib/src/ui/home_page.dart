@@ -571,6 +571,9 @@ class _HomePageState extends State<HomePage> {
   GitPlatform _guessPlatform(String url) {
     if (url.contains('github.com')) return GitPlatform.github;
     if (url.contains('gitee.com')) return GitPlatform.gitee;
+    if (url.contains('atomgit.com')) return GitPlatform.atomgit;
+    // gitcode.com 是 AtomGit 历史域名，两者均广泛使用，分别保留各自平台
+    if (url.contains('gitcode.com')) return GitPlatform.gitcode;
     return GitPlatform.gitcode;
   }
 }

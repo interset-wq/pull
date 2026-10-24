@@ -1,52 +1,88 @@
-/// 文档级表格渲染策略判定。
+/// 表格自然宽度估算（文档级两档渲染的判定依据）。
 ///
-/// markdown_widget 的表格默认 `IntrinsicColumnWidth`：列宽 = 内容固有
-/// 宽度，文本不换行，纯文本表格会被撑出屏幕、横滚条很长。改为
-/// `FlexColumnWidth` 后文本换行、表格铺满屏宽。
+/// 渲染策略（经用户确认）：
+/// - 表格自然宽度 ≤ 2 倍屏宽：保留固有列宽 + 横向滚动，不换行
+///   （最多 2 屏宽，滚动距离可控）；
+/// - 自然宽度 > 2 倍屏宽：FlexColumnWidth，表格固定为 2 倍屏宽，
+///   单元格在 2 屏宽内强制换行；横滚条保留。
 ///
-/// 但含长代码 / 长不可断行串 / 列数过多的表格换行会溢出或被截断，
-/// 必须保留横滚。本文件按文档内容二选一（TableConfig 作用于整篇文档
-/// 的所有表格，粒度到不了单表）：
-///
-/// 判定为 [TableLayout.scroll]（保留固有列宽 + 横向滚动）的条件，满足其一：
-/// - 任一行超过 5 列；
-/// - 任一格含 ≥16 字符的行内代码；
-/// - 任一格含 ≥24 字符的连续不可断行串（长 URL / 长标识符 / 长路径）。
+/// 宽度为估算值（CJK ≈ 1em、ASCII ≈ 0.55em、行内代码 ≈ 0.6em），
+/// 精度 ±20%，只用于 2 倍屏宽这一档的判定，贴线误判影响可接受。
 library;
 
-enum TableLayout { wrap, scroll }
+/// 每个单元格水平内边距（headPadding/bodyPadding 左右各 8）。
+const double _cellHPadding = 16;
+/// 边框线宽。
+const double _borderWidth = 1;
 
-/// 表格分隔行的特征：只含 `|`、`-`、`:`、空格，且至少一个 `-`。
-final RegExp _separatorRow = RegExp(r'^\s*\|?[\s:|-]*-[\s:|-]*$');
-
-TableLayout detectTableLayout(String body) {
+/// 估算文档中最宽表格的自然宽度（px）；无表格返回 0。
+double estimateTableNaturalWidth(String body, double fontSize) {
   var inFence = false;
+  final colMax = <int, double>{};
+  var best = 0.0;
   for (final raw in body.split('\n')) {
     final line = raw.trim();
     if (line.startsWith('```') || line.startsWith('~~~')) {
       inFence = !inFence;
+      colMax.clear();
       continue;
     }
-    if (inFence || !line.startsWith('|')) continue;
-    if (_separatorRow.hasMatch(line)) continue;
-    final cells = _splitRow(line);
-    if (cells.length > 5) return TableLayout.scroll;
-    for (final cell in cells) {
-      // 行内代码：`...`
-      if (RegExp(r'`[^`\n]{16,}`').hasMatch(cell)) return TableLayout.scroll;
-      // 连续不可断行串（ASCII 无空格长串：URL / 代码 / 路径）
-      if (RegExp(r'[A-Za-z0-9_./\\-]{24,}').hasMatch(cell)) {
-        return TableLayout.scroll;
-      }
+    if (inFence || !line.startsWith('|') || _isSeparatorRow(line)) {
+      colMax.clear();
+      continue;
     }
+    _accumulateRow(line, colMax, fontSize);
+    var w = 0.0;
+    for (final v in colMax.values) {
+      w += v;
+    }
+    best = w > best ? w : best;
   }
-  return TableLayout.wrap;
+  return best;
 }
 
-/// 拆一行表格为单元格列表（去掉首尾 `|` 产生的空项）。
-List<String> _splitRow(String line) {
-  final parts = line.split('|');
-  if (parts.isNotEmpty && parts.first.trim().isEmpty) parts.removeAt(0);
-  if (parts.isNotEmpty && parts.last.trim().isEmpty) parts.removeLast();
-  return parts;
+/// 逐列取最大单元格宽度（列宽 = 该列最宽单元格）。
+void _accumulateRow(String line, Map<int, double> colMax, double fontSize) {
+  final cells = line.split('|');
+  // 去掉首尾 `|` 产生的空项
+  if (cells.isNotEmpty && cells.first.trim().isEmpty) cells.removeAt(0);
+  if (cells.isNotEmpty && cells.last.trim().isEmpty) cells.removeLast();
+  for (var i = 0; i < cells.length; i++) {
+    final w =
+        _estimateCellWidth(cells[i].trim(), fontSize) +
+        _cellHPadding +
+        _borderWidth;
+    final prev = colMax[i];
+    if (prev == null || w > prev) colMax[i] = w;
+  }
+}
+
+double _estimateCellWidth(String cell, double fontSize) {
+  var total = 0.0;
+  var inCode = false;
+  for (final rune in cell.runes) {
+    final r = rune;
+    if (r == 0x60) {
+      inCode = !inCode;
+      total += 0.6 * fontSize;
+      continue;
+    }
+    // CJK / 全角字符 ≈ 1em，其余（拉丁、数字、空格、标点）≈ 0.55em
+    final isWide = r >= 0x2E80 && r <= 0x9FFF ||
+        r >= 0xAC00 && r <= 0xD7A3 ||
+        r >= 0xF900 && r <= 0xFAFF ||
+        r >= 0xFF01 && r <= 0xFF60;
+    total += (isWide ? 1.0 : (inCode ? 0.6 : 0.55)) * fontSize;
+  }
+  return total;
+}
+
+bool _isSeparatorRow(String line) {
+  if (!line.contains('-')) return false;
+  for (final c in line.split('')) {
+    if (c != '|' && c != '-' && c != ':' && c != ' ' && c != '\t') {
+      return false;
+    }
+  }
+  return true;
 }

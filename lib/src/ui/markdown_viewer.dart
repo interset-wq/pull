@@ -346,7 +346,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     var raw = await File(widget.note.absolutePath).readAsString();
     _rawSource = raw;
     RepoMeta.touchLastOpened(widget.repoRoot, widget.note.relativePath);
-    RepoMeta.pushRecent(widget.repoRoot, widget.note.relativePath);
+    RepoMeta.pushRecent(
+      widget.repoRoot,
+      widget.note.relativePath,
+      limit: AppPrefs.instance?.recentsLimit ?? 5,
+    );
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);
@@ -693,6 +697,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     double fontSize,
     String body,
   ) {
+    // 表格两档渲染：自然宽度 > 2 倍屏宽时按 2 倍屏宽强制换行
+    final screenWidth = MediaQuery.of(context).size.width;
+    final wrapTables =
+        estimateTableNaturalWidth(body, fontSize) > 2 * screenWidth;
     return MarkdownConfig(
       configs: [
         _H1Config(
@@ -800,18 +808,28 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 注意：不要设置 headerStyle——包内 TBodyNode 也读取 headerStyle
           // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
           // 不设置时包内默认即"表头加粗、正文正常"。
-          // 列宽策略：含长代码/长串/多列的文档保留固有列宽 + 横滚，
-          // 纯文本文档用 FlexColumnWidth 换行铺满屏宽（免长横滚条）
-          defaultColumnWidth:
-              detectTableLayout(body) == TableLayout.wrap
-                  ? const FlexColumnWidth()
-                  : const IntrinsicColumnWidth(),
+          // 列宽策略（两档）：表格自然宽度 > 2 倍屏宽时改用
+          // FlexColumnWidth 并固定 2 倍屏宽强制换行，否则保留固有列宽
+          // + 横向滚动（最多 2 屏宽，滚动距离可控）
+          defaultColumnWidth: wrapTables
+              ? const FlexColumnWidth()
+              : const IntrinsicColumnWidth(),
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,
             width: 1,
             borderRadius: BorderRadius.circular(6),
           ),
-          wrapper: (child) => HScrollbar(bottomPadding: 6, child: child),
+          wrapper: (child) => wrapTables
+              ? LayoutBuilder(
+                  builder: (context, constraints) => HScrollbar(
+                    bottomPadding: 6,
+                    child: SizedBox(
+                      width: constraints.maxWidth * 2,
+                      child: child,
+                    ),
+                  ),
+                )
+              : HScrollbar(bottomPadding: 6, child: child),
         ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),

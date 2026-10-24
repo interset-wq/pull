@@ -2,86 +2,80 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:reader/src/notes/table_layout.dart';
 
 void main() {
-  group('detectTableLayout', () {
-    test('无表格的文档 → wrap', () {
-      expect(detectTableLayout('# 标题\n\n纯文本段落。'), TableLayout.wrap);
+  group('estimateTableNaturalWidth', () {
+    test('无表格的文档 → 0', () {
+      expect(estimateTableNaturalWidth('# 标题\n\n纯文本段落。', 16), 0);
     });
 
-    test('纯文本短表格 → wrap（换行铺满屏宽）', () {
-      const md = '''
-| 功能 | 说明 |
-| --- | --- |
-| 克隆 | 整仓克隆到本地 |
-| 同步 | 启动时静默 pull |
-''';
-      expect(detectTableLayout(md), TableLayout.wrap);
-    });
-
-    test('长中文单元格仍 → wrap（CJK 可逐字断行）', () {
-      const md = '''
-| 项目 | 详细描述 |
-| --- | --- |
-| 阅读器 | 这是一个非常非常长的描述，用于验证中文单元格不会触发横滚策略 |
-''';
-      expect(detectTableLayout(md), TableLayout.wrap);
-    });
-
-    test('超过 5 列 → scroll', () {
-      const md = '''
-| a | b | c | d | e | f |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 2 | 3 | 4 | 5 | 6 |
-''';
-      expect(detectTableLayout(md), TableLayout.scroll);
-    });
-
-    test('单元格含长 URL → scroll', () {
-      const md = '''
-| 链接 |
-| --- |
-| https://gitcode.com/interset-wq/reader/releases |
-''';
-      expect(detectTableLayout(md), TableLayout.scroll);
-    });
-
-    test('单元格含长行内代码 → scroll', () {
-      const md = '''
-| API |
-| --- |
-| `repository.clone(checkoutBranch)` |
-''';
-      expect(detectTableLayout(md), TableLayout.scroll);
-    });
-
-    test('代码围栏内的竖线不算表格 → wrap', () {
-      const md = '''
-| 功能 | 说明 |
-| --- | --- |
-| a | b |
-
-```bash
-echo "not | a | table"
-''';
-      expect(detectTableLayout(md), TableLayout.wrap);
-    });
-
-    test('仅围栏内出现伪表格 → wrap', () {
+    test('代码围栏内的伪表格被忽略 → 0', () {
       const md = '''
 ```text
 | a | b | c | d | e | f | g |
 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 ```
 ''';
-      expect(detectTableLayout(md), TableLayout.wrap);
+      expect(estimateTableNaturalWidth(md, 16), 0);
     });
 
-    test('短行内代码不触发横滚 → wrap', () {
+    test('短中文表格宽度有限', () {
       const md = '''
-| 文件 | 大小 |
+| 功能 | 说明 |
 | --- | --- |
-| `main.dart` | 12 KB |
+| 克隆 | 整仓克隆到本地 |
+| 同步 | 启动时静默 pull |
 ''';
-      expect(detectTableLayout(md), TableLayout.wrap);
+      final w = estimateTableNaturalWidth(md, 16);
+      // 两列：每列最宽单元格 + 内边距/边框；粗估 2*(6*16+17) ≈ 230
+      expect(w, greaterThan(150));
+      expect(w, lessThan(400));
+    });
+
+    test('长中文表格宽度远超短表', () {
+      const md = '''
+| 题号 | 问题 | 要点答案 |
+| --- | --- | --- |
+| 1 | 自我介绍 | 结构 = 个人技能优势 + 工作背景 + 经验亮点。按岗位准备 3 个版本：功能/接口/性能/自动化/鸿蒙各一 |
+''';
+      final w = estimateTableNaturalWidth(md, 16);
+      // 答案列约 50 个 CJK 字符 ≈ 800px
+      expect(w, greaterThan(700));
+    });
+
+    test('多个表格取最宽的一个', () {
+      const md = '''
+| a | b |
+| --- | --- |
+| 1 | 2 |
+
+正文分隔。
+
+| 题号 | 问题 | 要点答案 |
+| --- | --- | --- |
+| 1 | 自我介绍 | 结构 = 个人技能优势 + 工作背景 + 经验亮点。按岗位准备 3 个版本：功能/接口/性能/自动化/鸿蒙各一 |
+''';
+      final w = estimateTableNaturalWidth(md, 16);
+      expect(w, greaterThan(700));
+    });
+
+    test('字号越大估算宽度越大', () {
+      const md = '''
+| 功能 | 说明 |
+| --- | --- |
+| 克隆 | 整仓克隆到本地 |
+''';
+      expect(estimateTableNaturalWidth(md, 18) ,
+          greaterThan(estimateTableNaturalWidth(md, 14)));
+    });
+
+    test('行内代码按 0.6em 估宽', () {
+      const md = '''
+| 命令 |
+| --- |
+| `cat/more/less/grep/head/tail/find/ls/pwd` |
+''';
+      // 42 字符（含反引号）* 0.6 * 16 ≈ 403 + 内边距/边框 17 ≈ 420
+      final w = estimateTableNaturalWidth(md, 16);
+      expect(w, closeTo(420, 5));
     });
   });
 }

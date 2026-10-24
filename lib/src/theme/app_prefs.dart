@@ -43,11 +43,13 @@ class AppPrefs extends ChangeNotifier {
   bool _keepScreenOn;
   bool get keepScreenOn => _keepScreenOn;
 
-  bool _codeLineNumbers;
-  bool get codeLineNumbers => _codeLineNumbers;
+  // 新增字段声明为可空：热重载会保留旧实例，旧实例构造时没有这些
+  // 参数（值为 null），getter 必须兜底默认值，否则整页崩溃。
+  bool? _codeLineNumbers;
+  bool get codeLineNumbers => _codeLineNumbers ?? true;
 
-  int _codeFoldThreshold;
-  int get codeFoldThreshold => _codeFoldThreshold;
+  int? _codeFoldThreshold;
+  int get codeFoldThreshold => _codeFoldThreshold ?? 30;
 
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
@@ -139,7 +141,7 @@ class AppPrefs extends ChangeNotifier {
   }
 
   Future<void> setCodeLineNumbers(bool v) async {
-    if (v == _codeLineNumbers) return;
+    if (v == codeLineNumbers) return;
     _codeLineNumbers = v;
     notifyListeners();
     await _save(_codeLineNumbersKey, v ? '1' : '0');
@@ -147,7 +149,7 @@ class AppPrefs extends ChangeNotifier {
 
   Future<void> setCodeFoldThreshold(int lines) async {
     final value = lines.clamp(10, 200);
-    if (value == _codeFoldThreshold) return;
+    if (value == codeFoldThreshold) return;
     _codeFoldThreshold = value;
     notifyListeners();
     try {

@@ -9,6 +9,7 @@ class HScrollbar extends StatefulWidget {
     required this.child,
     super.key,
     this.bottomPadding = 0,
+    this.onOverflow,
   });
 
   final Widget child;
@@ -16,12 +17,27 @@ class HScrollbar extends StatefulWidget {
   /// 内容下方滚动条条带高度（0 = 不显示条带，仅保留滚动能力）。
   final double bottomPadding;
 
+  /// 首帧布局后回调一次：`maxScrollExtent` = 内容自然宽度 − 视口宽
+  /// （无溢出为 0）。供上层做两档渲染判定，滚动中不再重复触发。
+  final ValueChanged<double>? onOverflow;
+
   @override
   State<HScrollbar> createState() => _HScrollbarState();
 }
 
 class _HScrollbarState extends State<HScrollbar> {
   final _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients) return;
+      final pos = _controller.position;
+      if (!pos.hasContentDimensions) return;
+      widget.onOverflow?.call(pos.maxScrollExtent);
+    });
+  }
 
   @override
   void dispose() {

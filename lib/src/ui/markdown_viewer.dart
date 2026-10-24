@@ -15,7 +15,6 @@ import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
-import '../notes/table_layout.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -169,6 +168,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _imageUrls = const [];
   String? _rawSource;
   bool _showRaw = false;
+  // 表格两档渲染：测量驱动——固有列宽首帧后任一表溢出超过视口宽
+  // （自然宽度 > 2 倍屏宽）时整篇切换为 FlexColumnWidth 换行档
+  bool _tableWrapMode = false;
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
@@ -497,7 +499,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               }
               final fontSize = _fontSizes[_fontIndex];
               final isDark = theme.brightness == Brightness.dark;
-              final config = _markdownConfig(theme, isDark, fontSize, snapshot.data!);
+              final config = _markdownConfig(theme, isDark, fontSize);
               return _renderBody(snapshot.data!, theme, config);
             },
           ),
@@ -691,16 +693,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
+  /// 测量驱动的表格两档切换：固有列宽首帧渲染后，任一表格溢出超过
+  /// 视口宽（即自然宽度 > 2 倍屏宽）时整篇切换为换行档重建。
+  void _onTableOverflow(double overflow) {
+    if (!mounted || _tableWrapMode) return;
+    final viewport = MediaQuery.of(context).size.width;
+    if (overflow > viewport) {
+      setState(() => _tableWrapMode = true);
+    }
+  }
+
   MarkdownConfig _markdownConfig(
     ThemeData theme,
     bool isDark,
     double fontSize,
-    String body,
   ) {
-    // 表格两档渲染：自然宽度 > 2 倍屏宽时按 2 倍屏宽强制换行
-    final screenWidth = MediaQuery.of(context).size.width;
-    final wrapTables =
-        estimateTableNaturalWidth(body, fontSize) > 2 * screenWidth;
     return MarkdownConfig(
       configs: [
         _H1Config(
@@ -808,10 +815,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 注意：不要设置 headerStyle——包内 TBodyNode 也读取 headerStyle
           // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
           // 不设置时包内默认即"表头加粗、正文正常"。
-          // 列宽策略（两档）：表格自然宽度 > 2 倍屏宽时改用
-          // FlexColumnWidth 并固定 2 倍屏宽强制换行，否则保留固有列宽
-          // + 横向滚动（最多 2 屏宽，滚动距离可控）
-          defaultColumnWidth: wrapTables
+          // 列宽策略（两档，测量驱动）：固有列宽首帧后若任一表溢出
+          // 超过视口宽（自然宽度 > 2 倍屏宽），整篇切 FlexColumnWidth
+          // 并固定 2 倍屏宽强制换行；否则保留固有列宽 + 横向滚动
+          defaultColumnWidth: _tableWrapMode
               ? const FlexColumnWidth()
               : const IntrinsicColumnWidth(),
           border: TableBorder.all(
@@ -819,7 +826,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             width: 1,
             borderRadius: BorderRadius.circular(6),
           ),
-          wrapper: (child) => wrapTables
+          wrapper: (child) => _tableWrapMode
               ? LayoutBuilder(
                   builder: (context, constraints) => HScrollbar(
                     bottomPadding: 6,
@@ -829,7 +836,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                     ),
                   ),
                 )
-              : HScrollbar(bottomPadding: 6, child: child),
+              : HScrollbar(
+                  bottomPadding: 6,
+                  onOverflow: _onTableOverflow,
+                  child: child,
+                ),
         ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),

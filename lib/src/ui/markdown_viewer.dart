@@ -275,19 +275,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
   }
 
-  /// 有历史阅读进度时轻提示「是否跳回上次位置」，用户不点则从开头读。
+  /// 有历史阅读进度时弹模态框询问「是否跳回上次位置」，
+  /// 用户选择「从头开始」则从开头读，不再强行跳转。
   void _offerProgressRestore(double saved, int? headingIdx) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 6),
-          content: const Text('上次读到此处'),
-          action: SnackBarAction(
-            label: '跳到上次位置',
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('上次读到此处'),
+        content: Text('是否跳转到上次阅读位置（约 ${(saved * 100).round()}%）？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('从头开始'),
+          ),
+          TextButton(
             onPressed: () {
-              if (!_scrollController.hasClients) return;
+              Navigator.pop(dialogContext);
+              if (!mounted || !_scrollController.hasClients) return;
               // 标题锚点优先：字号/窗口变化导致布局高度漂移时，
               // 标题位置不受影响，比纯比例恢复更准
               if (headingIdx != null &&
@@ -308,9 +313,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 );
               }
             },
+            child: const Text('跳到上次位置'),
           ),
-        ),
-      );
+        ],
+      ),
+    );
   }
 
   /// 当前章节 = 最后一个已进入视口顶部的标题。
@@ -1547,6 +1554,9 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                     child: Container(
                       alignment: Alignment.topRight,
                       padding: const EdgeInsets.only(right: 8),
+                      // 不透明底色：横滚时代码会滚到行号列下方，
+                      // 透明 gutter 会让代码文字透出、和行号混在一起
+                      color: theme.colorScheme.surface,
                       // 滚动容器裁剪：吸收缩放语境下与代码行的取整差，
                       // 否则 Column 比外层高 1px 就报 overflow
                       child: SingleChildScrollView(

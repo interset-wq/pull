@@ -18,8 +18,9 @@
 
 - **仓库置顶（Pin）**：首页仓库列表支持长按/菜单置顶常用仓库，置顶项固定在列表
   最前并有视觉标识，便于一键进入常看仓库；置顶状态持久化到本地。
-- **更新包名与 Favicon（应用图标）**：规范应用包名/应用 ID，替换应用图标（favicon）
-  与各平台启动图标，统一品牌视觉。
+- **替换应用图标（Favicon/启动图标）**：包名已统一为 `com.intersetwq.pullread`
+  （Android applicationId/namespace、iOS bundleId；旧包不迁移，数据重置），
+  剩应用图标与各平台启动图标替换，统一品牌视觉。
 
 ## 三、本地文件阅读器（Markdown / Notebook / TXT）
 

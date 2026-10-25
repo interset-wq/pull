@@ -11,12 +11,14 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val channelName = "app_icon"
 
-    /// alias 后缀 → 组件名。与 AndroidManifest 中三个 activity-alias 一一对应：
-    /// book=摊开书（默认），page=页即箭，arrow=抽页成箭。
+    /// alias 后缀 → 组件名。与 AndroidManifest 中五个 activity-alias 一一对应：
+    /// book=摊开书（默认），page=页即箭，arrow=抽页成箭，converge=汇页箭，tray=页堆箭。
     private val aliases = mapOf(
         "book" to ".MainActivityBook",
         "page" to ".MainActivityPage",
         "arrow" to ".MainActivityArrow",
+        "converge" to ".MainActivityConverge",
+        "tray" to ".MainActivityTray",
     )
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

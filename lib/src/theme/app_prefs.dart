@@ -35,7 +35,7 @@ class AppPrefs extends ChangeNotifier {
   static const _appIconKey = 'appIcon';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
-  static const kAppIconKeys = ['book', 'page', 'arrow'];
+  static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;

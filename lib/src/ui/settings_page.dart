@@ -17,6 +17,8 @@ const Map<String, String> kAppIconLabels = {
   'book': '摊开书',
   'page': '页即箭',
   'arrow': '抽页成箭',
+  'converge': '汇页箭',
+  'tray': '页堆箭',
 };
 
 /// 设置页：克隆偏好（默认托管平台 + 默认用户名）、

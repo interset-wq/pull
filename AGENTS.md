@@ -11,8 +11,8 @@
 - **应用图标切换**：桌面图标可在设置页五选一（摊开书/页即箭/抽页成箭/汇页箭/页堆箭，
   松绿 × 纸白）。Android 用五个 `activity-alias`（同一时刻仅启用一个，经 `PackageManager`
   `setComponentEnabledSetting` 切换，MethodChannel `app_icon`）；自适应图标前景
-  `drawable-xxxhdpi/ic_launcher_fg_*.png`（mark 主尺寸归一 432px 的 66%，**XML inset 必须为
-  0%**，双重缩小会让图标只占约 1/9 显得过小）+ 背景 `@color/brand_paper`；闪屏同纸白底。
+  `drawable-xxxhdpi/ic_launcher_fg_*.png`（mark 主尺寸归一 432px 的 50%，**XML inset 必须为
+  0%**；过大≈66% 会顶满无留白，过小≈33% 加 16% inset 时只占约 1/9）+ 背景 `@color/brand_paper`；闪屏同纸白底。
   iOS/Windows 未实现（iOS 备选图标 API 需真机验证，Windows 无此概念）；
   通道缺失的平台上 `setAppIcon` 仅持久化偏好、静默忽略。
 - **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证。

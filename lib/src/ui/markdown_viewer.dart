@@ -1029,7 +1029,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ..add(_buildEndNav(theme))
       ..add(const SizedBox(height: 90));
     return GestureDetector(
-      onHorizontalDragEnd: _openSiblingByDrag,
+      // 手势翻页默认关闭（设置页可开）：横滑易与代码块/表格的横向滚动混淆
+      onHorizontalDragEnd:
+          (AppPrefs.instance?.swipePaging ?? false) ? _openSiblingByDrag : null,
       child: Scrollbar(
         key: _viewportKey,
         controller: _scrollController,

@@ -33,6 +33,7 @@ class AppPrefs extends ChangeNotifier {
   static const _codeFoldEnabledKey = 'codeFoldEnabled';
   static const _recentsLimitKey = 'recentsLimit';
   static const _appIconKey = 'appIcon';
+  static const _swipePagingKey = 'swipePaging';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -70,6 +71,10 @@ class AppPrefs extends ChangeNotifier {
   int? _recentsLimit;
   int get recentsLimit => _recentsLimit ?? 5;
 
+  // 手势翻页开关：默认关闭（易与代码块/表格横滑混淆，交由用户显式开启）
+  bool? _swipePaging;
+  bool get swipePaging => _swipePaging ?? false;
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -92,6 +97,7 @@ class AppPrefs extends ChangeNotifier {
     var codeFoldEnabled = true;
     var recentsLimit = 5;
     var appIcon = 'book';
+    var swipePaging = false;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -120,6 +126,7 @@ class AppPrefs extends ChangeNotifier {
       codeFoldEnabled = sp.getBool(_codeFoldEnabledKey) ?? true;
       recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
       appIcon = sp.getString(_appIconKey) ?? 'book';
+      swipePaging = sp.getBool(_swipePagingKey) ?? false;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -135,6 +142,7 @@ class AppPrefs extends ChangeNotifier {
       recentsLimit,
     );
     prefs._appIcon = appIcon;
+    prefs._swipePaging = swipePaging;
     return _instance = prefs;
   }
 
@@ -229,6 +237,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setInt(_recentsLimitKey, clamped);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setSwipePaging(bool v) async {
+    if (v == swipePaging) return;
+    _swipePaging = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_swipePagingKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

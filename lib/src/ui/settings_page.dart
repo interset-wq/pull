@@ -117,6 +117,17 @@ class SettingsPage extends StatelessWidget {
             animation: prefs,
             builder: (context, _) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.swipe_outlined),
+              title: const Text('手势翻页'),
+              subtitle: const Text('正文区左右快滑切换上一篇/下一篇'),
+              value: prefs.swipePaging,
+              onChanged: (v) => prefs.setSwipePaging(v),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.format_list_numbered_outlined),
               title: const Text('代码行号'),
               subtitle: const Text('代码块左侧显示行号列'),

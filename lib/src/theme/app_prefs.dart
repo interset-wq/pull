@@ -34,6 +34,7 @@ class AppPrefs extends ChangeNotifier {
   static const _recentsLimitKey = 'recentsLimit';
   static const _appIconKey = 'appIcon';
   static const _swipePagingKey = 'swipePaging';
+  static const _wideTableKey = 'wideTable';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -75,6 +76,12 @@ class AppPrefs extends ChangeNotifier {
   bool? _swipePaging;
   bool get swipePaging => _swipePaging ?? false;
 
+  // 表格自然宽度开关：开启后表格始终按内容固有宽度渲染、超出视口横向
+  // 滚动（v0.1.0 行为，单元格不换行）；默认关闭——超宽表格自动切换为
+  // 按比例分摊的换行档（7e42d04 行为）
+  bool? _wideTable;
+  bool get wideTable => _wideTable ?? false;
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -98,6 +105,7 @@ class AppPrefs extends ChangeNotifier {
     var recentsLimit = 5;
     var appIcon = 'book';
     var swipePaging = false;
+    var wideTable = false;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -127,6 +135,7 @@ class AppPrefs extends ChangeNotifier {
       recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
       appIcon = sp.getString(_appIconKey) ?? 'book';
       swipePaging = sp.getBool(_swipePagingKey) ?? false;
+      wideTable = sp.getBool(_wideTableKey) ?? false;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -143,6 +152,7 @@ class AppPrefs extends ChangeNotifier {
     );
     prefs._appIcon = appIcon;
     prefs._swipePaging = swipePaging;
+    prefs._wideTable = wideTable;
     return _instance = prefs;
   }
 
@@ -250,6 +260,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_swipePagingKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setWideTable(bool v) async {
+    if (v == wideTable) return;
+    _wideTable = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_wideTableKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

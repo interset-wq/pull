@@ -128,6 +128,18 @@ class SettingsPage extends StatelessWidget {
             animation: prefs,
             builder: (context, _) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.table_rows_outlined),
+              title: const Text('表格不换行'),
+              subtitle: const Text(
+                  '每个表格右上角有切换按钮：平铺（按内容自然宽度横向滚动，一行放下所有内容）或换行（限两倍屏宽均分列宽）。此开关决定默认档位；关闭时超宽表格自动换行'),
+              value: prefs.wideTable,
+              onChanged: (v) => prefs.setWideTable(v),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.format_list_numbered_outlined),
               title: const Text('代码行号'),
               subtitle: const Text('代码块左侧显示行号列'),

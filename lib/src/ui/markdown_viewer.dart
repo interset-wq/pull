@@ -22,7 +22,6 @@ import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
-import 'proportional_column_width.dart';
 import 'home_page.dart';
 import 'image_gallery.dart';
 import 'repo_image.dart';
@@ -178,9 +177,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _imageUrls = const [];
   String? _rawSource;
   bool _showRaw = false;
-  // 表格两档渲染：测量驱动——固有列宽首帧后任一表溢出超过视口宽
-  // （自然宽度 > 2 倍屏宽）时整篇切换为 FlexColumnWidth 换行档
-  bool _tableWrapMode = false;
+  // 表格档位（按表存储）：key = 表格在文档中的序号（解析顺序，重建稳定），
+  // value = 是否换行档。缺省 = 跟随设置页默认（wideTable 开 → 平铺；关 →
+  // 测量驱动自动切档：该表自然宽度 > 2 倍屏宽时单独切为换行档）。
+  // 用户点过某表的右上角按钮后，该表不再自动切档。
+  final Map<int, bool> _tableWrapOverrides = {};
+  int _tableSeq = 0;
+
+  /// 表格 [index] 当前生效的换行档。
+  bool _tableWraps(int index) =>
+      _tableWrapOverrides[index] ?? !(AppPrefs.instance?.wideTable ?? false);
   late Future<String> _content;
   final _scrollController = AutoScrollController();
 
@@ -774,14 +780,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// 测量驱动的表格两档切换：固有列宽首帧渲染后，任一表格溢出超过
-  /// 视口宽（即自然宽度 > 2 倍屏宽）时整篇切换为换行档重建。
-  void _onTableOverflow(double overflow) {
-    if (!mounted || _tableWrapMode) return;
+  /// 测量驱动的表格自动切档（按表）：固有列宽首帧渲染后，该表溢出超过
+  /// 视口宽（即自然宽度 > 2 倍屏宽）时单独切换为换行档。
+  /// 仅在跟随设置默认时生效——wideTable 开关开启或该表已被手动指定档位
+  /// （点过其右上角按钮）都不再自动切换。
+  void _onTableOverflow(double overflow, int index) {
+    if (!mounted || _tableWrapOverrides.containsKey(index)) return;
+    if (AppPrefs.instance?.wideTable ?? false) return;
     final viewport = MediaQuery.of(context).size.width;
     if (overflow > viewport) {
-      setState(() => _tableWrapMode = true);
+      setState(() => _tableWrapOverrides[index] = true);
     }
+  }
+
+  /// 切换单个表格的档位（其右上角悬浮按钮）。
+  void _toggleTableMode(int index) {
+    setState(() => _tableWrapOverrides[index] = !_tableWraps(index));
   }
 
   MarkdownConfig _markdownConfig(
@@ -896,34 +910,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 注意：不要设置 headerStyle——包内 TBodyNode 也读取 headerStyle
           // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
           // 不设置时包内默认即"表头加粗、正文正常"。
-          // 列宽策略（两档，测量驱动）：固有列宽首帧后若任一表溢出
-          // 超过视口宽（自然宽度 > 2 倍屏宽），整篇切 ProportionalColumnWidth
-          // 并固定 2 倍屏宽，各列按内容宽度比例分摊、单元格强制换行；
-          // 列宽下限 = 2 个汉字 + 单元格水平内边距（16px）——"01"这类
-          // 两位序号列不再被比例分摊压到换行；否则保留固有列宽 + 横向滚动
-          defaultColumnWidth: _tableWrapMode
-              ? ProportionalColumnWidth(minCellWidth: fontSize * 2 + 16)
-              : const IntrinsicColumnWidth(),
+          // 列宽与宽度外壳不在此设置：自定义的 _PerTableNode 节点按表
+          // 独立决定（换行档固定 2 倍屏宽 + FlexColumnWidth 均分列宽，
+          // 平铺档固有列宽 + 横向滚动），见 _PerTableNode。
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,
             width: 1,
             borderRadius: BorderRadius.circular(6),
           ),
-          wrapper: (child) => _tableWrapMode
-              ? LayoutBuilder(
-                  builder: (context, constraints) => HScrollbar(
-                    bottomPadding: 6,
-                    child: SizedBox(
-                      width: constraints.maxWidth * 2,
-                      child: child,
-                    ),
-                  ),
-                )
-              : HScrollbar(
-                  bottomPadding: 6,
-                  onOverflow: _onTableOverflow,
-                  child: child,
-                ),
         ),
         _preConfig(theme, isDark),
         ImgConfig(builder: (url, alt) => _buildImage(url)),
@@ -939,9 +933,26 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     ThemeData theme,
     MarkdownConfig config,
   ) {
+    // 表格序号在本次渲染的解析过程中递增分配；每次构建归零，保证同一
+    // 文档的表格在重建间拿到稳定索引（_tableWrapOverrides 的 key）。
+    _tableSeq = 0;
     final generator = MarkdownGenerator(
       inlineSyntaxList: [MathInlineSyntax(), MathBlockSyntax()],
       generators: [
+        SpanNodeGeneratorWithTag(
+          tag: 'table',
+          // 覆盖包默认 TableNode：按表独立决定列宽档位与宽度外壳
+          generator: (element, config, visitor) {
+            final index = _tableSeq++;
+            return _PerTableNode(
+              config,
+              index: index,
+              wraps: () => _tableWraps(index),
+              onOverflow: (overflow) => _onTableOverflow(overflow, index),
+              onToggle: () => _toggleTableMode(index),
+            );
+          },
+        ),
         SpanNodeGeneratorWithTag(
           tag: 'math',
           generator: (element, config, visitor) =>
@@ -1763,6 +1774,119 @@ class _LineNumberColumn extends StatelessWidget {
       children: [
         for (var i = 1; i <= lineCount; i++)
           Text('$i', style: style, overflow: TextOverflow.clip),
+      ],
+    );
+  }
+}
+
+/// 按表独立的表格节点：复制包内 TableNode.build 的组装逻辑，但列宽档位
+/// 与宽度外壳由宿主按表决定——换行档固定 2 倍屏宽 + FlexColumnWidth 均
+/// 分列宽（单元格强制换行），平铺档固有列宽 + 横向滚动（v0.1.0 行为）。
+/// 依赖 markdown_widget 内部类（THeadNode/TBodyNode），升级包时需同步。
+class _PerTableNode extends ElementNode {
+  _PerTableNode(
+    this._mdConfig, {
+    required this.index,
+    required this.wraps,
+    required this.onOverflow,
+    required this.onToggle,
+  });
+
+  final MarkdownConfig _mdConfig;
+  final int index;
+  final bool Function() wraps;
+  final ValueChanged<double> onOverflow;
+  final VoidCallback onToggle;
+
+  @override
+  InlineSpan build() {
+    // 与包内 TableNode.build 一致：表头行 + 表体行组装
+    final rows = <TableRow>[];
+    var cellCount = 0;
+    for (final child in children) {
+      if (child is THeadNode) {
+        cellCount = child.cellCount;
+        rows.addAll(child.rows);
+      } else if (child is TBodyNode) {
+        rows.addAll(child.buildRows(cellCount));
+      }
+    }
+    final table = Table(
+      columnWidths: _mdConfig.table.columnWidths,
+      defaultColumnWidth:
+          wraps() ? const FlexColumnWidth(1) : const IntrinsicColumnWidth(),
+      textBaseline: _mdConfig.table.textBaseline,
+      border: _mdConfig.table.border ??
+          TableBorder.all(
+              color: parentStyle?.color ??
+                  _mdConfig.p.textStyle.color ??
+                  Colors.grey),
+      defaultVerticalAlignment: _mdConfig.table.defaultVerticalAlignment ??
+          TableCellVerticalAlignment.middle,
+      children: rows,
+    );
+    return WidgetSpan(
+      child: _MarkdownTableHost(
+        wraps: wraps(),
+        onOverflow: onOverflow,
+        onToggle: onToggle,
+        child: table,
+      ),
+    );
+  }
+
+  @override
+  TextStyle? get style => parentStyle;
+}
+
+/// 单个表格的宽度外壳与右上角档位切换按钮（无状态，状态在宿主页的
+/// _tableWrapOverrides；点击回调触发宿主 setState 重建）。
+class _MarkdownTableHost extends StatelessWidget {
+  const _MarkdownTableHost({
+    required this.wraps,
+    required this.onOverflow,
+    required this.onToggle,
+    required this.child,
+  });
+
+  final bool wraps;
+  final ValueChanged<double> onOverflow;
+  final VoidCallback onToggle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final core = wraps
+        ? LayoutBuilder(
+            builder: (context, constraints) => HScrollbar(
+              bottomPadding: 6,
+              child: SizedBox(
+                width: constraints.maxWidth * 2,
+                child: child,
+              ),
+            ),
+          )
+        : HScrollbar(
+            bottomPadding: 6,
+            onOverflow: onOverflow,
+            child: child,
+          );
+    return Stack(
+      children: [
+        core,
+        Positioned(
+          top: 0,
+          right: 0,
+          child: IconButton(
+            tooltip: wraps ? '该表切换为平铺（不换行）' : '该表切换为换行（限两倍屏宽）',
+            icon: const Icon(Icons.swap_horiz),
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: onToggle,
+          ),
+        ),
       ],
     );
   }

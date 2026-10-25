@@ -82,7 +82,7 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: false,
-        title: Text('Reader', style: theme.textTheme.headlineMedium),
+        title: Text('Pull 拉读', style: theme.textTheme.headlineMedium),
         actions: [
           IconButton(
             tooltip: '全部更新',

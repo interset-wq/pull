@@ -12,6 +12,6 @@ void main() {
   testWidgets('app builds home page', (tester) async {
     await tester.pumpWidget(const ReaderApp());
     await tester.pump();
-    expect(find.text('Reader'), findsOneWidget);
+    expect(find.text('Pull 拉读'), findsOneWidget);
   });
 }

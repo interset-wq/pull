@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../git/repo_meta.dart';
@@ -451,9 +452,35 @@ class _HomePageState extends State<HomePage> {
     return '${prefs.platform.webBase}/$owner/$repo.git';
   }
 
+  /// 仓库地址匹配（剪贴板快速导入）：托管平台完整 URL。
+  static final RegExp _repoUrlRegExp = RegExp(
+    r'https?://(www\.)?(github\.com|gitee\.com|atomgit\.com|gitcode\.com)'
+    r'/[\w.\-]+/[\w.\-]+',
+    caseSensitive: false,
+  );
+
+  /// 剪贴板快速导入（Roadmap「导入与同步体验」）：克隆页打开时读取剪贴板，
+  /// 内容是仓库地址（完整 URL 或 `owner/repo` 短格式）则自动填充；
+  /// 识别失败静默不打扰。
+  Future<void> _prefillFromClipboard(TextEditingController ctrl) async {
+    try {
+      final text = (await Clipboard.getData('text/plain'))?.text?.trim();
+      if (text == null || text.isEmpty || text.length > 500) return;
+      final isUrl = text.startsWith('http://') || text.startsWith('https://');
+      final ok = isUrl
+          ? _repoUrlRegExp.hasMatch(text)
+          : RegExp(r'^[\w.\-]+/[\w.\-]+$').hasMatch(text);
+      if (!ok) return;
+      ctrl.text = text;
+    } catch (_) {
+      // 剪贴板不可用（部分设备权限受限）时静默跳过
+    }
+  }
+
   Future<void> _showCloneDialog() async {
     final urlCtrl = TextEditingController();
     final prefs = AppPrefs.instance;
+    unawaited(_prefillFromClipboard(urlCtrl));
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

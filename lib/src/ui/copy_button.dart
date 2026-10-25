@@ -25,22 +25,21 @@ class _CopyButtonState extends State<CopyButton> {
 
   @override
   Widget build(BuildContext context) {
+    // 与表格右上角档位切换按钮同规格：28×28 紧凑 IconButton，
+    // 悬浮锚定在容器右上角，不参与内容布局、不受横向滚动影响
     return Material(
       color: Colors.transparent,
-      child: Tooltip(
-        message: '复制代码',
-        child: InkWell(
-          borderRadius: BorderRadius.circular(6),
-          onTap: _copy,
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Icon(
-              _copied ? Icons.check : Icons.copy_outlined,
-              size: 16,
-              color: _copied ? Colors.green : Colors.grey,
-            ),
-          ),
+      child: IconButton(
+        tooltip: _copied ? '已复制' : '复制代码',
+        icon: Icon(
+          _copied ? Icons.check : Icons.copy_outlined,
+          color: _copied ? Colors.green : null,
         ),
+        iconSize: 16,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.all(6),
+        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+        onPressed: _copy,
       ),
     );
   }

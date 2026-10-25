@@ -1657,6 +1657,11 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
             folded ? lines.take(widget.foldThreshold).join('\n') : widget.code;
         final gutterLines = folded ? widget.foldThreshold : total;
         final label = widget.language.isNotEmpty ? widget.language : 'text';
+        // 代码区背景 = 高亮主题 root 背景（github #f8f8f8 / atomOneDark #282c34）。
+        // 行号列必须用同一颜色：页面 surface 色与之不同，会在左侧形成竖条，
+        // 和右上语言标签行拼成"7"形色差
+        final codeBg = widget.theme['root']?.backgroundColor ??
+            theme.colorScheme.surface;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1700,9 +1705,9 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                     child: Container(
                       alignment: Alignment.topRight,
                       padding: const EdgeInsets.only(right: 8),
-                      // 不透明底色：横滚时代码会滚到行号列下方，
-                      // 透明 gutter 会让代码文字透出、和行号混在一起
-                      color: theme.colorScheme.surface,
+                      // 不透明底色且与代码区同色：横滚时代码会滚到行号列
+                      // 下方，透明或异色 gutter 会让代码透出、并形成"7"形色差
+                      color: codeBg,
                       // 滚动容器裁剪：吸收缩放语境下与代码行的取整差，
                       // 否则 Column 比外层高 1px 就报 overflow
                       child: SingleChildScrollView(
@@ -1716,8 +1721,8 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                     ),
                   ),
                 Positioned(
-                  top: 4,
-                  right: 4,
+                  top: 0,
+                  right: 0,
                   child: CopyButton(code: widget.code),
                 ),
               ],

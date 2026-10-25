@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
@@ -458,6 +459,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   setState(() => _showRaw = !_showRaw);
                 case 'font':
                   _showFontSheet();
+                case 'copy':
+                  _copyFullText();
               }
             },
             itemBuilder: (_) => [
@@ -466,6 +469,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 child: Text(_showRaw ? '渲染视图' : 'Raw 模式'),
               ),
               const PopupMenuItem(value: 'font', child: Text('字号')),
+              const PopupMenuItem(
+                value: 'copy',
+                child: Text('复制全文（Markdown）'),
+              ),
             ],
           ),
         ],
@@ -514,6 +521,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
       bottomNavigationBar: _buildFooterNav(theme),
     );
+  }
+
+  /// 复制整篇 Markdown 源码到剪贴板（Roadmap「导出与分享·复制全文」）。
+  Future<void> _copyFullText() async {
+    final raw = _rawSource;
+    if (raw == null || raw.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('内容尚未加载完成')));
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: raw));
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已复制全文（Markdown）')));
+    }
   }
 
   /// 跳到仓库内 `subPath` 对应的目录页（'' = 仓库根）。
@@ -967,9 +989,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: children,
+          // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/桌面窗口下
+          // 正文限宽居中，不拉满全屏；窄屏下 maxWidth 不起作用
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 860),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: children,
+              ),
+            ),
           ),
         ),
       ),

@@ -8,6 +8,12 @@
 - **包名**：`com.intersetwq.pullread`（Android applicationId/namespace、iOS bundleId 同一标识；
   Kotlin `MainActivity` 位于 `android/app/src/main/kotlin/com/intersetwq/pullread/`。
   2026-10 由 `com.intersetwq.reader` 更名而来，旧包不覆盖升级、数据不迁移）
+- **应用图标切换**：桌面图标可在设置页三选一（摊开书/页即箭/抽页成箭，松绿 × 纸白）。
+  Android 用三个 `activity-alias`（同一时刻仅启用一个，经 `PackageManager`
+  `setComponentEnabledSetting` 切换，MethodChannel `app_icon`）；自适应图标前景
+  `drawable-xxxhdpi/ic_launcher_fg_*.png` + 背景 `@color/brand_paper`；闪屏同纸白底。
+  iOS/Windows 未实现（iOS 备选图标 API 需真机验证，Windows 无此概念）；
+  通道缺失的平台上 `setAppIcon` 仅持久化偏好、静默忽略。
 - **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证。
   - **Android 硬约束**：git2dart 静态链接的 OpenSSL 无法访问系统证书库，`main()` 必须在 `runApp` 前依次执行 `WidgetsFlutterBinding.ensureInitialized()` → `Libgit2.version`（初始化 libgit2）→ `AndroidSSLHelper.initialize()` → `Libgit2.setSSLCertLocations(file:)`，否则 HTTPS 克隆报 "the SSL certificate is invalid"（CA 证书包随 git2dart_binaries 打包，无需自备）。
   - **isolate 硬约束**：git 操作在 `Isolate.run` 后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platforms/git_platform.dart';
@@ -31,6 +32,10 @@ class AppPrefs extends ChangeNotifier {
   static const _codeFoldThresholdKey = 'codeFoldThreshold';
   static const _codeFoldEnabledKey = 'codeFoldEnabled';
   static const _recentsLimitKey = 'recentsLimit';
+  static const _appIconKey = 'appIcon';
+
+  /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
+  static const kAppIconKeys = ['book', 'page', 'arrow'];
 
   ThemeMode _mode;
   ThemeMode get mode => _mode;
@@ -65,6 +70,11 @@ class AppPrefs extends ChangeNotifier {
   int? _recentsLimit;
   int get recentsLimit => _recentsLimit ?? 5;
 
+  // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
+  String? _appIcon;
+  String get appIcon =>
+      _appIcon != null && kAppIconKeys.contains(_appIcon) ? _appIcon! : 'book';
+
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
 
@@ -81,6 +91,7 @@ class AppPrefs extends ChangeNotifier {
     var codeFoldThreshold = 30;
     var codeFoldEnabled = true;
     var recentsLimit = 5;
+    var appIcon = 'book';
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -108,10 +119,11 @@ class AppPrefs extends ChangeNotifier {
       codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
       codeFoldEnabled = sp.getBool(_codeFoldEnabledKey) ?? true;
       recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
+      appIcon = sp.getString(_appIconKey) ?? 'book';
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
-    return _instance = AppPrefs._(
+    final prefs = AppPrefs._(
       mode,
       platform,
       owner,
@@ -122,6 +134,8 @@ class AppPrefs extends ChangeNotifier {
       codeFoldEnabled,
       recentsLimit,
     );
+    prefs._appIcon = appIcon;
+    return _instance = prefs;
   }
 
   Future<void> setMode(ThemeMode m) async {
@@ -217,6 +231,21 @@ class AppPrefs extends ChangeNotifier {
       await sp.setInt(_recentsLimitKey, clamped);
     } on Object {
       // 保存失败不影响本次会话
+    }
+  }
+
+  /// 切换应用图标（Android activity-alias，经原生通道）；
+  /// 其他平台无原生实现，仅持久化偏好。
+  Future<void> setAppIcon(String key) async {
+    if (!kAppIconKeys.contains(key) || key == appIcon) return;
+    _appIcon = key;
+    notifyListeners();
+    await _save(_appIconKey, key);
+    try {
+      await const MethodChannel('app_icon')
+          .invokeMethod<bool>('setIcon', {'icon': key});
+    } on Object {
+      // Windows / 预览环境：通道不存在，忽略
     }
   }
 

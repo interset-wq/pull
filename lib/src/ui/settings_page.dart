@@ -12,6 +12,13 @@ import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
 /// 应用发布页（GitCode Releases），供手动下载最新 APK 更新。
 const String kReleaseUrl = 'https://gitcode.com/interset-wq/reader/releases';
 
+/// 应用图标选项（与 AppPrefs.kAppIconKeys / AndroidManifest alias 对应）。
+const Map<String, String> kAppIconLabels = {
+  'book': '摊开书',
+  'page': '页即箭',
+  'arrow': '抽页成箭',
+};
+
 /// 设置页：克隆偏好（默认托管平台 + 默认用户名）、
 /// 代码字体选择与应用更新入口。
 class SettingsPage extends StatelessWidget {
@@ -167,6 +174,32 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 32),
+          Text('应用图标', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => Row(
+              children: [
+                for (final e in kAppIconLabels.entries)
+                  Expanded(
+                    child: _IconOption(
+                      label: e.value,
+                      asset: 'assets/icons/icon_${e.key}.png',
+                      selected: prefs.appIcon == e.key,
+                      onTap: () => prefs.setAppIcon(e.key),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '切换后桌面图标在 launcher 刷新后生效（部分机型需重新启动桌面）',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(height: 16),
           Text('数据', style: theme.textTheme.titleMedium),
           ListTile(
@@ -255,6 +288,64 @@ class SettingsPage extends StatelessWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已清空')),
+    );
+  }
+}
+
+/// 应用图标选项卡片：预览图 + 名称，选中态描边。
+class _IconOption extends StatelessWidget {
+  const _IconOption({
+    required this.label,
+    required this.asset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final String asset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: selected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outlineVariant,
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.asset(asset, width: 56, height: 56),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight:
+                    selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

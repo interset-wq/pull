@@ -21,11 +21,47 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+        </activity>
+        <!-- 应用图标切换（设置页选择）：主 activity 不再直接持有 LAUNCHER
+             intent-filter，由三个 activity-alias 分别提供；同一时刻只启用
+             一个（android:enabled），切换经 PackageManager setComponentEnabledSetting。
+             name 与 icon 一一对应：book=默认摊开书，page=页即箭，arrow=抽页成箭。 -->
+        <activity-alias
+            android:name=".MainActivityBook"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_book"
+            android:label="Pull 拉读"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityPage"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_page"
+            android:label="Pull 拉读"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityArrow"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_arrow"
+            android:label="Pull 拉读"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

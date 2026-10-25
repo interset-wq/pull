@@ -77,4 +77,44 @@ void main() {
     expect(empty.size.width, greaterThanOrEqualTo(0));
     expect(content.size.width, greaterThan(0));
   });
+
+  testWidgets('列宽下限：两位序号列停在下限，不再被比例分摊压到换行', (tester) async {
+    const floor = 48.0; // 约等于 2 个汉字 + 单元格水平内边距
+    final wide = '汉' * 120;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 600,
+              child: Table(
+                defaultColumnWidth: const ProportionalColumnWidth(
+                  minCellWidth: floor,
+                ),
+                border: TableBorder.all(),
+                children: [
+                  TableRow(children: [
+                    const KeyedSubtree(
+                      key: ValueKey('narrow'),
+                      child: Text('01'),
+                    ),
+                    KeyedSubtree(
+                      key: const ValueKey('wide'),
+                      child: Text(wide),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final narrowCell = tester.renderObject<RenderBox>(find.byKey(const ValueKey('narrow')));
+    // 收缩后窄列停在下限（允许亚像素误差），"01" 单行放下
+    expect(narrowCell.size.width, greaterThanOrEqualTo(floor - 0.5),
+        reason: '窄列宽 ${narrowCell.size.width} 应 >= 下限 $floor');
+  });
 }

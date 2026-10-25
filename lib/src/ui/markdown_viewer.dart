@@ -899,9 +899,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 列宽策略（两档，测量驱动）：固有列宽首帧后若任一表溢出
           // 超过视口宽（自然宽度 > 2 倍屏宽），整篇切 ProportionalColumnWidth
           // 并固定 2 倍屏宽，各列按内容宽度比例分摊、单元格强制换行；
-          // 否则保留固有列宽 + 横向滚动
+          // 列宽下限 = 2 个汉字 + 单元格水平内边距（16px）——"01"这类
+          // 两位序号列不再被比例分摊压到换行；否则保留固有列宽 + 横向滚动
           defaultColumnWidth: _tableWrapMode
-              ? const ProportionalColumnWidth()
+              ? ProportionalColumnWidth(minCellWidth: fontSize * 2 + 16)
               : const IntrinsicColumnWidth(),
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,

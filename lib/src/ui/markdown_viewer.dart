@@ -21,6 +21,7 @@ import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
+import 'proportional_column_width.dart';
 import 'home_page.dart';
 import 'image_gallery.dart';
 import 'repo_image.dart';
@@ -824,10 +825,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // （bodyStyle 未被使用），设置加粗表头会让全表变粗体；
           // 不设置时包内默认即"表头加粗、正文正常"。
           // 列宽策略（两档，测量驱动）：固有列宽首帧后若任一表溢出
-          // 超过视口宽（自然宽度 > 2 倍屏宽），整篇切 FlexColumnWidth
-          // 并固定 2 倍屏宽强制换行；否则保留固有列宽 + 横向滚动
+          // 超过视口宽（自然宽度 > 2 倍屏宽），整篇切 ProportionalColumnWidth
+          // 并固定 2 倍屏宽，各列按内容宽度比例分摊、单元格强制换行；
+          // 否则保留固有列宽 + 横向滚动
           defaultColumnWidth: _tableWrapMode
-              ? const FlexColumnWidth()
+              ? const ProportionalColumnWidth()
               : const IntrinsicColumnWidth(),
           border: TableBorder.all(
             color: theme.colorScheme.outlineVariant,

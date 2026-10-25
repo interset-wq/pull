@@ -224,6 +224,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _content = _load();
     _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
     _scrollController.addListener(_onScroll);
+    // 音量键翻页：全局 handler，页面销毁即注销，其他页面不受影响
+    HardwareKeyboard.instance.addHandler(_handleVolumeKey);
     // 屏幕常亮：仅阅读页生效，离开即恢复系统行为
     if (AppPrefs.instance?.keepScreenOn ?? false) {
       WakelockPlus.enable();
@@ -243,6 +245,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   @override
   void dispose() {
     WakelockPlus.disable();
+    HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _currentSection.dispose();
@@ -536,6 +539,53 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已复制全文（Markdown）')));
     }
+  }
+
+  /// 手势翻页（Roadmap「阅读操作手感」）：正文区域左右快速滑动切换
+  /// 上一篇/下一篇。代码块/表格内部的横向滚动视图在手势竞技场中优先，
+  /// 横滑它们不会误触翻页；慢速拖动（<500px/s）也不触发。
+  void _openSiblingByDrag(DragEndDetails details) {
+    final v = details.primaryVelocity ?? 0;
+    if (v.abs() < 500) return;
+    if (v < 0) {
+      _openNextSibling();
+    } else {
+      _openPrevSibling();
+    }
+  }
+
+  void _openPrevSibling() {
+    if (_siblings.isEmpty || _siblingIndex <= 0) return;
+    _openSibling(_siblings[_siblingIndex - 1]);
+  }
+
+  void _openNextSibling() {
+    if (_siblings.isEmpty ||
+        _siblingIndex < 0 ||
+        _siblingIndex >= _siblings.length - 1) {
+      return;
+    }
+    _openSibling(_siblings[_siblingIndex + 1]);
+  }
+
+  /// 音量键翻页（Roadmap「阅读操作手感」）：阅读页内音量上/下键滚动一屏，
+  /// 返回 handled 阻止系统调整音量。非本页按键一律放行。
+  bool _handleVolumeKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+    final up = key == LogicalKeyboardKey.audioVolumeUp;
+    final down = key == LogicalKeyboardKey.audioVolumeDown;
+    if (!up && !down) return false;
+    if (!_scrollController.hasClients) return false;
+    final pos = _scrollController.position;
+    final target = (pos.pixels + (down ? 1 : -1) * pos.viewportDimension * 0.9)
+        .clamp(0.0, pos.maxScrollExtent);
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+    return true;
   }
 
   /// 跳到仓库内 `subPath` 对应的目录页（'' = 仓库根）。
@@ -978,25 +1028,28 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ..add(const Divider(height: 32))
       ..add(_buildEndNav(theme))
       ..add(const SizedBox(height: 90));
-    return Scrollbar(
-      key: _viewportKey,
-      controller: _scrollController,
-      thumbVisibility: true,
-      thickness: 4,
-      radius: const Radius.circular(4),
-      child: SingleChildScrollView(
+    return GestureDetector(
+      onHorizontalDragEnd: _openSiblingByDrag,
+      child: Scrollbar(
+        key: _viewportKey,
         controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/桌面窗口下
-          // 正文限宽居中，不拉满全屏；窄屏下 maxWidth 不起作用
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 860),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: children,
+        thumbVisibility: true,
+        thickness: 4,
+        radius: const Radius.circular(4),
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/桌面窗口下
+            // 正文限宽居中，不拉满全屏；窄屏下 maxWidth 不起作用
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 860),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: children,
+                ),
               ),
             ),
           ),

@@ -60,7 +60,27 @@ class MarkdownViewerPage extends StatefulWidget {
 
   /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
   /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
+  /// 代码保护段：围栏代码块（``` / ~~~，允许未闭合）与行内代码（单反引号）。
+  /// 匹配到的段落内不做任何 HTML 归一化，标签原样显示。
+  static final RegExp _codeProtectedRegExp = RegExp(
+    r'```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`',
+  );
+
   static String normalizeHtmlImages(String md) {
+    final out = StringBuffer();
+    var cursor = 0;
+    for (final m in _codeProtectedRegExp.allMatches(md)) {
+      out
+        ..write(_normalizeHtmlImagesPlain(md.substring(cursor, m.start)))
+        ..write(m.group(0)!);
+      cursor = m.end;
+    }
+    out.write(_normalizeHtmlImagesPlain(md.substring(cursor)));
+    return out.toString();
+  }
+
+  /// 普通文本段的 HTML 归一化（调用前已剥离代码保护段）。
+  static String _normalizeHtmlImagesPlain(String md) {
     final stripped = md
         .replaceAllMapped(
           _htmlImgRegExp,
@@ -81,19 +101,7 @@ class MarkdownViewerPage extends StatefulWidget {
         .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n')
         // 徽章/SVG 图片在排版中无意义，直接忽略
         .replaceAll(_ignoredImageRegExp, '');
-    // 行内/块级样式标签转 Markdown 等价语法：按代码围栏切分，
-    // 围栏内原样保留，仅转换围栏外的文本
-    const fence = r'```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)';
-    final out = StringBuffer();
-    var cursor = 0;
-    for (final m in RegExp(fence).allMatches(stripped)) {
-      out
-        ..write(_convertHtmlTags(stripped.substring(cursor, m.start)))
-        ..write(m.group(0)!);
-      cursor = m.end;
-    }
-    out.write(_convertHtmlTags(stripped.substring(cursor)));
-    return out.toString();
+    return _convertHtmlTags(stripped);
   }
 
   /// HTML 标签转 Markdown：

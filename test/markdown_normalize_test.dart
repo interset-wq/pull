@@ -106,5 +106,33 @@ void main() {
       expect(out.contains('<strong>raw</strong>'), isTrue, reason: out);
       expect(out.contains('<h2>keep</h2>'), isTrue);
     });
+
+    test('围栏代码块内 img/div/br 等剥离类标签同样原样保留', () {
+      const src = '```html\n'
+          '<div class="a">box</div>\n'
+          '<img src="x.png">\n'
+          'a<br>b\n'
+          '```\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('<div class="a">box</div>'), isTrue, reason: out);
+      expect(out.contains('<img src="x.png">'), isTrue, reason: out);
+      expect(out.contains('a<br>b'), isTrue, reason: out);
+    });
+
+    test('行内代码中的 HTML 标签原样保留', () {
+      const src = '用 `<div>` 与 `a<br>b` 与 `<img src="x">` 演示\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('`<div>`'), isTrue, reason: out);
+      expect(out.contains('`a<br>b`'), isTrue, reason: out);
+      expect(out.contains('`<img src="x">`'), isTrue, reason: out);
+    });
+
+    test('行内代码外的 <br> 照常转换为换行', () {
+      const src = '上句<br>下句\n';
+      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      expect(out.contains('<br'), isFalse, reason: out);
+      expect(out.contains('上句'), isTrue);
+      expect(out.contains('下句'), isTrue);
+    });
   });
 }

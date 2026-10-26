@@ -45,8 +45,14 @@ flutter pub get
 flutter run                 # 运行（连接设备/模拟器）
 flutter analyze             # 静态检查
 flutter test
-flutter build apk --release
+flutter build apk --split-per-abi --target-platform android-arm64
 ```
+
+APK 打包约定：只打 arm64-v8a（主流手机架构），固定用上述命令
+（产物 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`，
+约 32MB；通用 fat APK 约 79MB）。注意：gradle `ndk.abiFilters` 对
+Flutter 注入的 so 无效且与 `--split-per-abi` 冲突，不要用它限制架构；
+x86_64 模拟器无法安装本 APK，模拟器调试走 debug 构建。
 
 ## 维护规则
 

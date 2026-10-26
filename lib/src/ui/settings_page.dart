@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -9,8 +10,8 @@ import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
 
-/// 应用发布页（GitCode Releases），供手动下载最新 APK 更新。
-const String kReleaseUrl = 'https://gitcode.com/interset-wq/reader/releases';
+/// 应用发布页（GitHub Releases，CI 自动构建发布），供手动下载最新 APK。
+const String kReleaseUrl = 'https://github.com/interset-wq/pull/releases';
 
 /// 应用图标选项（与 AppPrefs.kAppIconKeys / AndroidManifest alias 对应）。
 const Map<String, String> kAppIconLabels = {
@@ -318,13 +319,14 @@ class SettingsPage extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.system_update_outlined),
             title: const Text('检查更新'),
-            subtitle: const Text('前往 GitCode Releases 下载最新 APK'),
+            subtitle: const Text('前往 GitHub Releases 下载最新 APK'),
             trailing: const Icon(Icons.open_in_new, size: 18),
             onTap: () => launchUrl(
               Uri.parse(kReleaseUrl),
               mode: LaunchMode.externalApplication,
             ),
           ),
+          const _AppInfoTile(),
         ],
       ),
     );
@@ -416,6 +418,50 @@ class SettingsPage extends StatelessWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已清空')),
+    );
+  }
+}
+
+/// 应用信息（包名 / 版本号 / 版本码）：经 app_icon 通道的 getInfo 读取
+/// Android PackageInfo；通道缺失（Windows 预览）或读取失败时静默隐藏。
+class _AppInfoTile extends StatefulWidget {
+  const _AppInfoTile();
+
+  @override
+  State<_AppInfoTile> createState() => _AppInfoTileState();
+}
+
+class _AppInfoTileState extends State<_AppInfoTile> {
+  static const _channel = MethodChannel('app_icon');
+  Map<Object, Object?>? _info;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final info = await _channel
+          .invokeMethod<Map<Object, Object?>>('getInfo')
+          .timeout(const Duration(seconds: 3));
+      if (mounted && info != null) setState(() => _info = info);
+    } on Object {
+      // Windows 预览 / 通道异常：保持隐藏
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _info;
+    if (info == null) return const SizedBox.shrink();
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.info_outline),
+      title: const Text('应用信息'),
+      subtitle: Text('${info['packageName']}\n${info['versionName']}+${info['versionCode']}'),
+      isThreeLine: true,
     );
   }
 }

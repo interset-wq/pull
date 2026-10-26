@@ -1,0 +1,47 @@
+name: Release
+
+# 推送 v* 标签触发：校验 pubspec 版本号与 tag 一致 → 构建 arm64-only
+# release APK → 创建 GitHub Release 并上传，避免手动上传造成 APK 与
+# 源码构建不一致。发版流程：改 pubspec version → commit → 打同名 tag。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify tag matches pubspec version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUBSPEC_VERSION="$(grep -oP '^version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' pubspec.yaml)"
+          echo "tag=${GITHUB_REF_NAME} pubspec=${PUBSPEC_VERSION}"
+          if [ "$VERSION" != "$PUBSPEC_VERSION" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 pubspec.yaml version ${PUBSPEC_VERSION} 不一致——请先提交版本号改动再打 tag"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.4
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build arm64 release APK
+        run: flutter build apk --split-per-abi --target-platform android-arm64
+
+      - name: Create release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          generate_release_notes: true

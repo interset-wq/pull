@@ -39,6 +39,21 @@ class MainActivity : FlutterActivity() {
                             result.error("failed", e.message, null)
                         }
                     }
+                    "getInfo" -> {
+                        try {
+                            val pm = applicationContext.packageManager
+                            val info = pm.getPackageInfo(packageName, 0)
+                            result.success(
+                                mapOf(
+                                    "packageName" to packageName,
+                                    "versionName" to info.versionName,
+                                    "versionCode" to info.longVersionCode,
+                                )
+                            )
+                        } catch (e: Exception) {
+                            result.error("failed", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }

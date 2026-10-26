@@ -54,6 +54,12 @@ APK 打包约定：只打 arm64-v8a（主流手机架构），固定用上述命
 Flutter 注入的 so 无效且与 `--split-per-abi` 冲突，不要用它限制架构；
 x86_64 模拟器无法安装本 APK，模拟器调试走 debug 构建。
 
+发版约定：正式 Release 只经 GitHub（interset-wq/pull）发布——推送
+`v*` tag 触发 `.github/workflows/release.yml`，CI 校验 tag 与
+pubspec `version` 一致后自动构建 arm64 APK 并创建 Release，禁止手动
+上传 APK（避免与源码构建不一致）。发版流程 = 改 pubspec version →
+提交 → 打同名 tag 推送。
+
 ## 维护规则
 
 项目结构、构建/测试命令、架构边界、开发约定或本文件记录的其他事实发生变化时，必须在同一次改动中同步更新本文件。

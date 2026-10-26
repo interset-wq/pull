@@ -10,7 +10,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-Android-4c8f56)](#-下载)
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Release](https://img.shields.io/badge/release-v1.5.0-f5b301)](https://gitcode.com/interset-wq/reader/releases)
+[![Release](https://img.shields.io/badge/release-v1.5.0-f5b301)](https://github.com/interset-wq/pull/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
@@ -64,13 +64,13 @@
 
 ## 📥 下载
 
-前往 [Releases](https://gitcode.com/interset-wq/reader/releases) 下载最新 Android APK
-（arm64-v8a，约 32MB，覆盖主流机型）。
+前往 [Releases](https://github.com/interset-wq/pull/releases) 下载最新 Android APK
+（arm64-v8a，约 32MB，覆盖主流机型；tag 推送后由 GitHub Actions 自动构建发布）。
 
 ## 🚀 快速开始
 
 ```bash
-git clone https://gitcode.com/interset-wq/reader.git
+git clone https://github.com/interset-wq/pull.git
 cd reader
 flutter pub get
 flutter run                 # 运行（连接设备/模拟器）
@@ -78,6 +78,9 @@ flutter analyze             # 静态检查
 flutter test                # 测试
 flutter build apk --split-per-abi --target-platform android-arm64  # 构建 release APK（arm64）
 ```
+
+> 发版流程：更新 `pubspec.yaml` 的 `version`（如 `1.6.0+6`）→ 提交 → 打同名 tag（`v1.6.0`）并推送，
+> GitHub Actions 自动校验版本一致、构建 arm64 APK 并创建 Release——无需手动上传。
 
 > 首次运行需在手机浏览器完成应用权限（存储路径在系统默认目录下的 `reader/` 仓库根）。
 

@@ -16,6 +16,7 @@ import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
+import '../utils/markdown_plain_text.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -470,6 +471,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   _showFontSheet();
                 case 'copy':
                   _copyFullText();
+                case 'copyText':
+                  _copyPlainText();
               }
             },
             itemBuilder: (_) => [
@@ -481,6 +484,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               const PopupMenuItem(
                 value: 'copy',
                 child: Text('复制全文（Markdown）'),
+              ),
+              const PopupMenuItem(
+                value: 'copyText',
+                child: Text('复制全文（纯文本）'),
               ),
             ],
           ),
@@ -544,6 +551,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已复制全文（Markdown）')));
+    }
+  }
+
+  /// 复制整篇为纯文本（Roadmap「导出与分享·复制纯文本」）：
+  /// GFM AST 提取正文，剥掉 Markdown 语法标记，直接可粘贴到聊天工具。
+  Future<void> _copyPlainText() async {
+    final raw = _rawSource;
+    if (raw == null || raw.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('内容尚未加载完成')));
+      return;
+    }
+    await Clipboard.setData(
+      ClipboardData(text: markdownToPlainText(raw)),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已复制全文（纯文本）')));
     }
   }
 

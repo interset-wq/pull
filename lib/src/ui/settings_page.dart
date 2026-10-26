@@ -422,17 +422,38 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-/// 应用信息（包名 / 版本号 / 版本码）：经 app_icon 通道的 getInfo 读取
-/// Android PackageInfo；通道缺失（Windows 预览）或读取失败时静默隐藏。
-class _AppInfoTile extends StatefulWidget {
+/// 「应用信息」入口：点击进入关于页，详细信息在关于页内加载。
+class _AppInfoTile extends StatelessWidget {
   const _AppInfoTile();
 
   @override
-  State<_AppInfoTile> createState() => _AppInfoTileState();
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.info_outline),
+      title: const Text('应用信息'),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const _AboutPage()),
+      ),
+    );
+  }
 }
 
-class _AppInfoTileState extends State<_AppInfoTile> {
+/// 关于页（文件内私有）：采用应用商店流行的 About 形式——居中应用图标 + 名称 +
+/// 版本号，下方分组列出包名、开源许可证、项目主页与检查更新入口。
+class _AboutPage extends StatefulWidget {
+  const _AboutPage();
+
+  @override
+  State<_AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<_AboutPage> {
   static const _channel = MethodChannel('app_icon');
+  static const _repoUrl = 'https://github.com/interset-wq/pull';
+  static const _licenseUrl = '$_repoUrl/blob/main/LICENSE';
+
   Map<Object?, Object?>? _info;
 
   @override
@@ -450,20 +471,103 @@ class _AppInfoTileState extends State<_AppInfoTile> {
           .timeout(const Duration(seconds: 3));
       if (mounted && info != null) setState(() => _info = info);
     } on Object {
-      // Windows 预览 / 通道异常：保持隐藏
+      // Windows 预览 / 通道异常：仅显示静态信息
+    }
+  }
+
+  Future<void> _open(Uri uri) async {
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } on Object {
+      // 打不开（无浏览器等）静默忽略
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final info = _info;
-    if (info == null) return const SizedBox.shrink();
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.info_outline),
-      title: const Text('应用信息'),
-      subtitle: Text('${info['packageName']}\n${info['versionName']}+${info['versionCode']}'),
-      isThreeLine: true,
+    final theme = Theme.of(context);
+    final version = _info == null
+        ? null
+        : '${_info!['versionName']}+${_info!['versionCode']}';
+    return Scaffold(
+      appBar: AppBar(title: const Text('关于')),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          const SizedBox(height: 40),
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: Image.asset(
+                'assets/icons/icon_book.png',
+                width: 96,
+                height: 96,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: Text(
+              'Pull 拉读',
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          if (version != null) ...[
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                'v$version',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 40),
+          if (_info != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.tag_outlined),
+              title: const Text('包名'),
+              subtitle: Text('${_info!['packageName']}'),
+            ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history_edu_outlined),
+            title: const Text('开源许可证'),
+            subtitle: const Text('MIT License'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => _open(Uri.parse(_licenseUrl)),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.code_outlined),
+            title: const Text('项目主页'),
+            subtitle: const Text('GitHub · interset-wq/pull'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => _open(Uri.parse(_repoUrl)),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.system_update_outlined),
+            title: const Text('检查更新'),
+            subtitle: const Text('下载最新 Release APK'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => _open(Uri.parse(kReleaseUrl)),
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Text(
+              '把笔记仓库装进口袋的原生阅读器',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 }

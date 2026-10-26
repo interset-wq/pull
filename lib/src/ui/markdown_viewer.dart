@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../git/repo_meta.dart';
+import '../notes/details_syntax.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
@@ -1109,6 +1110,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _detailsSeq = 0;
     final generator = MarkdownGenerator(
       inlineSyntaxList: [MathInlineSyntax(), MathBlockSyntax()],
+      // markdown 包把 <details> 当原始 HTML 文本（不产出元素），自定义
+      // 块级语法必须注入，否则 details 生成器永远不会被调用
+      blockSyntaxList: [DetailsBlockSyntax()],
       generators: [
         SpanNodeGeneratorWithTag(
           tag: 'table',

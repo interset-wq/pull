@@ -201,6 +201,48 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
+          // 听书（Roadmap「听书」）：语速/音调，播放中的段落下一段生效
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.speed_outlined),
+              title: const Text('听书语速'),
+              subtitle: Text('${prefs.ttsRate.toStringAsFixed(1)} 倍速'),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.ttsRate,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 15,
+                  label: prefs.ttsRate.toStringAsFixed(1),
+                  onChanged: prefs.setTtsRate,
+                ),
+              ),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.graphic_eq_outlined),
+              title: const Text('听书音调'),
+              subtitle: Text(prefs.ttsPitch.toStringAsFixed(1)),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.ttsPitch,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 15,
+                  label: prefs.ttsPitch.toStringAsFixed(1),
+                  onChanged: prefs.setTtsPitch,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           // 本周阅读统计（Roadmap「检索与标注·阅读统计」）：纯本地
           FutureBuilder<ReadingWeeklySummary>(
             future: _weeklyStats(),

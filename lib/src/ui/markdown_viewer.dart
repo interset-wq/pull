@@ -621,6 +621,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                   ),
+                  if (player.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      player.error!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,

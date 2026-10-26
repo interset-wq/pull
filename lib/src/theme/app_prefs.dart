@@ -37,8 +37,6 @@ class AppPrefs extends ChangeNotifier {
   static const _wideTableKey = 'wideTable';
   static const _ignoreDefaultsKey = 'ignoreDefaults';
   static const _ignoreRulesKey = 'ignoreRules';
-  static const _ttsRateKey = 'ttsRate';
-  static const _ttsPitchKey = 'ttsPitch';
   static const _detailsExpandedKey = 'detailsExpanded';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
@@ -96,14 +94,6 @@ class AppPrefs extends ChangeNotifier {
   List<String>? _ignoreRules;
   List<String> get ignoreRules => _ignoreRules ?? const [];
 
-  // 听书语速/音调（倍率）：flutter_tts 语速区间 0–1（≈0.5 正常），
-  // 存倍率便于跨平台语义一致，播报时再映射
-  double? _ttsRate;
-  double get ttsRate => _ttsRate ?? 1.0;
-
-  double? _ttsPitch;
-  double get ttsPitch => _ttsPitch ?? 1.0;
-
   // 折叠块（<details>）默认是否展开（未显式 open 时），默认展开
   bool? _detailsExpanded;
   bool get detailsExpanded => _detailsExpanded ?? true;
@@ -134,8 +124,6 @@ class AppPrefs extends ChangeNotifier {
     var wideTable = false;
     var ignoreDefaults = true;
     var ignoreRules = const <String>[];
-    var ttsRate = 1.0;
-    var ttsPitch = 1.0;
     var detailsExpanded = true;
     try {
       final sp =
@@ -169,8 +157,6 @@ class AppPrefs extends ChangeNotifier {
       wideTable = sp.getBool(_wideTableKey) ?? false;
       ignoreDefaults = sp.getBool(_ignoreDefaultsKey) ?? true;
       ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
-      ttsRate = (sp.getDouble(_ttsRateKey) ?? 1.0).clamp(0.5, 2.0);
-      ttsPitch = (sp.getDouble(_ttsPitchKey) ?? 1.0).clamp(0.5, 2.0);
       detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
@@ -191,8 +177,6 @@ class AppPrefs extends ChangeNotifier {
     prefs._wideTable = wideTable;
     prefs._ignoreDefaults = ignoreDefaults;
     prefs._ignoreRules = ignoreRules;
-    prefs._ttsRate = ttsRate;
-    prefs._ttsPitch = ttsPitch;
     prefs._detailsExpanded = detailsExpanded;
     return _instance = prefs;
   }
@@ -354,34 +338,6 @@ class AppPrefs extends ChangeNotifier {
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.remove(_ignoreRulesKey);
       await sp.setBool(_ignoreDefaultsKey, true);
-    } on Object {
-      // 保存失败不影响本次会话
-    }
-  }
-
-  Future<void> setTtsRate(double v) async {
-    final value = v.clamp(0.5, 2.0);
-    if (value == ttsRate) return;
-    _ttsRate = value;
-    notifyListeners();
-    try {
-      final sp =
-          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
-      await sp.setDouble(_ttsRateKey, value);
-    } on Object {
-      // 保存失败不影响本次会话
-    }
-  }
-
-  Future<void> setTtsPitch(double v) async {
-    final value = v.clamp(0.5, 2.0);
-    if (value == ttsPitch) return;
-    _ttsPitch = value;
-    notifyListeners();
-    try {
-      final sp =
-          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
-      await sp.setDouble(_ttsPitchKey, value);
     } on Object {
       // 保存失败不影响本次会话
     }

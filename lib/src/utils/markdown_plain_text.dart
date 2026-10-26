@@ -4,17 +4,10 @@ import 'package:markdown/markdown.dart' as m;
 /// 复用渲染管线的 GFM 解析（github-flavored 扩展集），按块级结构提取：
 /// 标题/段落间空行分隔；代码块保留内容；图片用 alt 文本；链接保留链接
 /// 文字（丢 URL）；列表保留标记并缩进嵌套层；表格行用 ` | ` 连接单元格。
-/// 供阅读页「复制全文（纯文本）」与听书的正文提取共用。
 String markdownToPlainText(String source) =>
-    _extractBlocks(source, speech: false).join('\n\n');
+    _extractBlocks(source).join('\n\n');
 
-/// 听书朗读段落提取（Roadmap「听书」）：跳过代码块与表格（读出来是
-/// 无意义字符流），标题/段落/列表照常转文本，引用去掉 `> ` 前缀，
-/// 每个块级元素为一段，空块过滤。
-List<String> markdownToSpeechParagraphs(String source) =>
-    _extractBlocks(source, speech: true);
-
-List<String> _extractBlocks(String source, {required bool speech}) {
+List<String> _extractBlocks(String source) {
   final doc = m.Document(
     extensionSet: m.ExtensionSet.gitHubFlavored,
     encodeHtml: false,
@@ -23,7 +16,7 @@ List<String> _extractBlocks(String source, {required bool speech}) {
   final blocks = doc.parseLines(lines);
   final out = <String>[];
   for (final node in blocks) {
-    _walkBlock(node, out, depth: 0, speech: speech);
+    _walkBlock(node, out, depth: 0);
   }
   return out.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 }
@@ -32,7 +25,6 @@ void _walkBlock(
   m.Node node,
   List<String> out, {
   required int depth,
-  required bool speech,
 }) {
   if (node is m.Text) {
     final t = node.text.trim();
@@ -47,20 +39,17 @@ void _walkBlock(
     case 'p':
       out.add(_inline(node));
     case 'pre':
-      if (speech) break; // 朗读跳过代码块
       // 代码块内容原样保留（textContent 已含换行）
       final t = node.textContent;
       out.add(t.trimRight());
     case 'blockquote':
       final inner = <String>[];
       for (final c in node.children ?? const <m.Node>[]) {
-        _walkBlock(c, inner, depth: depth, speech: speech);
+        _walkBlock(c, inner, depth: depth);
       }
       if (inner.isEmpty) break;
-      // 纯文本保留引用标记；朗读去掉前缀直接读
-      out.add(speech
-          ? inner.join('\n')
-          : inner.map((s) => '> $s').join('\n> '));
+      // 保留引用标记
+      out.add(inner.map((s) => '> $s').join('\n> '));
     case 'ul' || 'ol':
       var i = 0;
       for (final li in node.children ?? const <m.Node>[]) {
@@ -76,7 +65,7 @@ void _walkBlock(
                 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table',
               }.contains(c.tag);
           if (nested) {
-            _walkBlock(c, parts, depth: depth + 1, speech: speech);
+            _walkBlock(c, parts, depth: depth + 1);
           } else {
             final t = _inline(c).trim();
             if (t.isNotEmpty) parts.add(t);
@@ -88,7 +77,6 @@ void _walkBlock(
         }
       }
     case 'table':
-      if (speech) break; // 朗读跳过表格
       for (final row in node.children ?? const <m.Node>[]) {
         if (row is! m.Element || row.tag != 'thead' && row.tag != 'tbody') {
           continue;

@@ -433,7 +433,7 @@ class _AppInfoTile extends StatefulWidget {
 
 class _AppInfoTileState extends State<_AppInfoTile> {
   static const _channel = MethodChannel('app_icon');
-  Map<Object, Object?>? _info;
+  Map<Object?, Object?>? _info;
 
   @override
   void initState() {
@@ -443,8 +443,10 @@ class _AppInfoTileState extends State<_AppInfoTile> {
 
   Future<void> _load() async {
     try {
+      // MethodChannel 编解码返回 Map<Object?, Object?>，直接指定更具体的
+      // 泛型会在 cast 处抛 TypeError，须按原始类型接收后自行取值
       final info = await _channel
-          .invokeMethod<Map<Object, Object?>>('getInfo')
+          .invokeMethod<Map<Object?, Object?>>('getInfo')
           .timeout(const Duration(seconds: 3));
       if (mounted && info != null) setState(() => _info = info);
     } on Object {

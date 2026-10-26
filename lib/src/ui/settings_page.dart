@@ -354,6 +354,35 @@ class SettingsPage extends StatelessWidget {
               },
             ),
           ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.visibility_off_outlined),
+              title: const Text('隐藏默认忽略项'),
+              subtitle: const Text(
+                  '点开头的文件/目录、.git、node_modules、.obsidian、temp'),
+              value: prefs.ignoreDefaults,
+              onChanged: prefs.setIgnoreDefaults,
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.rule_outlined),
+              title: const Text('自定义隐藏规则'),
+              subtitle: Text(
+                prefs.ignoreRules.isEmpty
+                    ? '按文件/目录名精确匹配，跨仓库生效；未添加'
+                    : '${prefs.ignoreRules.length} 条：${prefs.ignoreRules.join('、')}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => _editIgnoreRules(context),
+            ),
+          ),
           const SizedBox(height: 16),
           Text('应用', style: theme.textTheme.titleMedium),
           ListTile(
@@ -404,6 +433,54 @@ class SettingsPage extends StatelessWidget {
     final docs = await getApplicationDocumentsDirectory();
     final root = '${docs.path}${Platform.pathSeparator}repos';
     return ReadingStats.weeklySummary(root);
+  }
+
+  /// 编辑自定义隐藏规则：每行一条（文件/目录名精确匹配）。
+  /// 「恢复默认」清空规则并把默认隐藏规则开关恢复为开。
+  Future<void> _editIgnoreRules(BuildContext context) async {
+    final controller = TextEditingController(
+      text: prefs.ignoreRules.join('\n'),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('自定义隐藏规则'),
+        content: TextField(
+          controller: controller,
+          maxLines: 6,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '每行一条，例如：\ndist\nbuild\nassets',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              prefs.resetIgnoreRules();
+              Navigator.pop(dialogContext, false);
+            },
+            child: const Text('恢复默认'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final rules = controller.text
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+    await prefs.setIgnoreRules(rules);
   }
 
   /// 在应用文档目录的 repos 根执行清空，并给出结果反馈。

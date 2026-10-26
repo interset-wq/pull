@@ -65,14 +65,19 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadRepos() async {
     final root = await _reposRoot;
     if (!mounted) return;
-    setState(() {
-      _repos = root
-          .listSync(followLinks: false)
-          .whereType<Directory>()
-          .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
-              .existsSync())
-          .toList();
+    final dirs = root
+        .listSync(followLinks: false)
+        .whereType<Directory>()
+        .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
+            .existsSync())
+        .toList();
+    // 置顶（Roadmap「仓库管理·仓库置顶」）固定在最前，其余保持原顺序
+    dirs.sort((a, b) {
+      final pa = RepoMeta.isPinned(a.path) ? 0 : 1;
+      final pb = RepoMeta.isPinned(b.path) ? 0 : 1;
+      return pa.compareTo(pb);
     });
+    setState(() => _repos = dirs);
   }
 
   @override
@@ -209,6 +214,11 @@ class _HomePageState extends State<HomePage> {
                           name: name,
                           source: meta?.source,
                           lastOpened: meta?.lastOpened,
+                          pinned: RepoMeta.isPinned(repo.path),
+                          onTogglePin: () {
+                            RepoMeta.togglePin(repo.path);
+                            _loadRepos();
+                          },
                           onTap: () => _openRepo(repo),
                           onDelete: () => _confirmDelete(repo),
                         );
@@ -643,6 +653,8 @@ class _RepoCard extends StatelessWidget {
     required this.name,
     required this.onTap,
     required this.onDelete,
+    required this.pinned,
+    required this.onTogglePin,
     this.source,
     this.lastOpened,
   });
@@ -650,6 +662,10 @@ class _RepoCard extends StatelessWidget {
   final String name;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+
+  /// 是否已置顶（Roadmap「仓库管理·仓库置顶」）。
+  final bool pinned;
+  final VoidCallback onTogglePin;
 
   /// 远端来源（host + /owner/repo），未记录时为 null。
   final String? source;
@@ -670,12 +686,20 @@ class _RepoCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
+        onLongPress: onTogglePin,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Icon(Icons.folder_special_outlined,
-                  color: theme.colorScheme.primary, size: 32),
+              Icon(
+                pinned
+                    ? Icons.push_pin
+                    : Icons.folder_special_outlined,
+                color: pinned
+                    ? const Color(0xFFF5B301)
+                    : theme.colorScheme.primary,
+                size: 32,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -706,6 +730,14 @@ class _RepoCard extends StatelessWidget {
                     ],
                   ],
                 ),
+              ),
+              IconButton(
+                tooltip: pinned ? '取消置顶' : '置顶仓库',
+                icon: Icon(
+                  pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  color: pinned ? const Color(0xFFF5B301) : null,
+                ),
+                onPressed: onTogglePin,
               ),
               IconButton(
                 tooltip: '删除仓库',

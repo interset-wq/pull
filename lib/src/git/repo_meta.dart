@@ -72,6 +72,19 @@ class RepoMeta {
     );
   }
 
+  /// 仓库置顶（Roadmap「仓库管理·仓库置顶」）：存于本仓库 meta，
+  /// 随 RepoMeta.remove 与仓库一并消失，无需单独清理。
+  static bool isPinned(String repoRoot) => _readRaw(repoRoot)['pinned'] == true;
+
+  /// 切换置顶状态，返回切换后的值。
+  static bool togglePin(String repoRoot) {
+    final raw = _readRaw(repoRoot);
+    final v = !(raw['pinned'] == true);
+    raw['pinned'] = v;
+    _write(repoRoot, raw);
+    return v;
+  }
+
   static void writeClone(
     String repoRoot, {
     required String url,

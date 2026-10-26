@@ -2,6 +2,4 @@
 <resources>
     <!-- 品牌纸白（素雅纸感）：闪屏与自适应图标背景统一用色 -->
     <color name="brand_paper">#FBFAF6</color>
-    <!-- 旧模板自适应图标背景（保留，避免旧引用断链） -->
-    <color name="ic_launcher_background">#00796B</color>
 </resources>

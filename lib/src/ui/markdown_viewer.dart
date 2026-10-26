@@ -17,6 +17,7 @@ import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
 import '../utils/markdown_plain_text.dart';
+import '../utils/reading_stats.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -229,6 +230,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     // 过来的新页面会停在空状态，翻页按钮消失
     _loadSiblings();
     _content = _load();
+    _readingWatch.start();
     _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
     _scrollController.addListener(_onScroll);
     // 音量键翻页：全局 handler，页面销毁即注销，其他页面不受影响
@@ -248,9 +250,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   // 进度恢复只做一次（内容构建完成后）；保存按滚动节流
   bool _restorePending = true;
   DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
+  // 阅读统计（Roadmap「检索与标注·阅读统计」）：本页停留时长，
+  // dispose 时计入当天（单会话上限 2 小时防异常驻留刷高统计）
+  final Stopwatch _readingWatch = Stopwatch();
 
   @override
   void dispose() {
+    // 阅读统计：本页停留时长（单会话上限 2 小时）计入当天
+    _readingWatch.stop();
+    final minutes = _readingWatch.elapsedMilliseconds / 60000;
+    if (minutes > 0.1) {
+      ReadingStats.record(
+        widget.repoRoot,
+        widget.note.relativePath,
+        minutes.clamp(0, 120),
+      );
+    }
     WakelockPlus.disable();
     HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
     _scrollController.removeListener(_onScroll);

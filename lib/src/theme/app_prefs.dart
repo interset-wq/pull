@@ -35,6 +35,8 @@ class AppPrefs extends ChangeNotifier {
   static const _appIconKey = 'appIcon';
   static const _swipePagingKey = 'swipePaging';
   static const _wideTableKey = 'wideTable';
+  static const _ignoreDefaultsKey = 'ignoreDefaults';
+  static const _ignoreRulesKey = 'ignoreRules';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -82,6 +84,15 @@ class AppPrefs extends ChangeNotifier {
   bool? _wideTable;
   bool get wideTable => _wideTable ?? false;
 
+  // Ignore 配置（Roadmap「设置增强·Ignore 配置」）：默认隐藏规则开关
+  // （.git/.gitignore/.github/node_modules/点开头名，见 NoteScanner）+
+  // 自定义文件/目录名规则（按名字精确匹配，跨仓库生效）
+  bool? _ignoreDefaults;
+  bool get ignoreDefaults => _ignoreDefaults ?? true;
+
+  List<String>? _ignoreRules;
+  List<String> get ignoreRules => _ignoreRules ?? const [];
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -106,6 +117,8 @@ class AppPrefs extends ChangeNotifier {
     var appIcon = 'book';
     var swipePaging = false;
     var wideTable = false;
+    var ignoreDefaults = true;
+    var ignoreRules = const <String>[];
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -136,6 +149,8 @@ class AppPrefs extends ChangeNotifier {
       appIcon = sp.getString(_appIconKey) ?? 'book';
       swipePaging = sp.getBool(_swipePagingKey) ?? false;
       wideTable = sp.getBool(_wideTableKey) ?? false;
+      ignoreDefaults = sp.getBool(_ignoreDefaultsKey) ?? true;
+      ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -153,6 +168,8 @@ class AppPrefs extends ChangeNotifier {
     prefs._appIcon = appIcon;
     prefs._swipePaging = swipePaging;
     prefs._wideTable = wideTable;
+    prefs._ignoreDefaults = ignoreDefaults;
+    prefs._ignoreRules = ignoreRules;
     return _instance = prefs;
   }
 
@@ -273,6 +290,46 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_wideTableKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setIgnoreDefaults(bool v) async {
+    if (v == ignoreDefaults) return;
+    _ignoreDefaults = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_ignoreDefaultsKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setIgnoreRules(List<String> v) async {
+    _ignoreRules = List.unmodifiable(v);
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setStringList(_ignoreRulesKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  /// 恢复默认：清空自定义规则并恢复默认隐藏规则开关。
+  Future<void> resetIgnoreRules() async {
+    _ignoreRules = const [];
+    _ignoreDefaults = true;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.remove(_ignoreRulesKey);
+      await sp.setBool(_ignoreDefaultsKey, true);
     } on Object {
       // 保存失败不影响本次会话
     }

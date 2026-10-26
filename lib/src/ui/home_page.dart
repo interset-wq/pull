@@ -768,7 +768,13 @@ class RepoPage extends StatefulWidget {
 }
 
 class _RepoPageState extends State<RepoPage> {
-  final _scanner = NoteScanner();
+  late final NoteScanner _scanner = () {
+    final prefs = AppPrefs.instance;
+    return NoteScanner(
+      useDefaults: prefs?.ignoreDefaults ?? true,
+      customRules: prefs?.ignoreRules ?? const [],
+    );
+  }();
   List<NoteFile>? _allNotes;
   String _query = '';
 
@@ -787,7 +793,7 @@ class _RepoPageState extends State<RepoPage> {
     setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
   }
 
-  /// 当前目录下的子文件夹（跳过隐藏与临时目录），排序后返回名称。
+  /// 当前目录下的子文件夹（应用 ignore 规则），排序后返回名称。
   List<String> _subDirs() {
     if (!mounted) return const [];
     final dir = _currentDir;
@@ -796,8 +802,7 @@ class _RepoPageState extends State<RepoPage> {
         .listSync(followLinks: false)
         .whereType<Directory>()
         .map((d) => d.path.split(Platform.pathSeparator).last)
-        .where((name) =>
-            !name.startsWith('.') && !NoteScanner.skipDirs.contains(name))
+        .where((name) => !_scanner.isIgnored(name))
         .toList()
       ..sort(compareNatural);
   }

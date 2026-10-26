@@ -4,6 +4,14 @@ export '../utils/natural_sort.dart';
 
 /// 扫描本地仓库中的笔记（Markdown/Notebook）、代码、图片与其他文本文件。
 class NoteScanner {
+  /// 自定义隐藏规则（Roadmap「设置增强·Ignore 配置」）：按文件/目录名
+  /// 精确匹配，跨仓库生效；由调用方从设置传入。
+  NoteScanner({this.useDefaults = true, this.customRules = const []});
+
+  /// 是否启用默认隐藏规则（点开头名 + [skipDirs]）。
+  /// `.git` 恒被跳过——关掉默认规则也不进 git 内部目录。
+  final bool useDefaults;
+  final List<String> customRules;
   static const mdExtensions = {'.md', '.markdown', '.ipynb'};
 
   /// 支持语法高亮查看的代码/文本扩展名。
@@ -34,6 +42,15 @@ class NoteScanner {
 
   static const skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
 
+  /// 名称是否被隐藏：自定义规则（精确名匹配，文件与目录都生效）优先；
+  /// 默认规则 = 点开头名 + skipDirs（.git 恒忽略）。
+  bool isIgnored(String name) {
+    if (name == '.git') return true;
+    if (customRules.contains(name)) return true;
+    if (!useDefaults) return false;
+    return name.startsWith('.') || skipDirs.contains(name);
+  }
+
   /// 递归列出仓库下所有可查看文件（相对仓库根的路径），
   /// 按最后修改时间倒序。
   List<NoteFile> scan(String repoRoot) {
@@ -48,8 +65,8 @@ class NoteScanner {
   void _walk(Directory dir, Directory root, List<NoteFile> out) {
     for (final entity in dir.listSync(followLinks: false)) {
       final name = entity.path.split(Platform.pathSeparator).last;
+      if (isIgnored(name)) continue;
       if (entity is Directory) {
-        if (skipDirs.contains(name) || name.startsWith('.')) continue;
         _walk(entity, root, out);
       } else if (entity is File) {
         final ext = name.contains('.')

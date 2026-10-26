@@ -18,6 +18,7 @@ import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
 import '../utils/markdown_plain_text.dart';
 import '../utils/reading_stats.dart';
+import '../utils/tts_player.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -253,6 +254,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   // 阅读统计（Roadmap「检索与标注·阅读统计」）：本页停留时长，
   // dispose 时计入当天（单会话上限 2 小时防异常驻留刷高统计）
   final Stopwatch _readingWatch = Stopwatch();
+  // 听书播放器（Roadmap「听书」）：懒创建，段落从当前 Raw 源提取
+  TtsPlayer? _ttsPlayer;
 
   @override
   void dispose() {
@@ -266,6 +269,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         minutes.clamp(0, 120),
       );
     }
+    // 听书：离开阅读页即停止朗读并释放引擎
+    _ttsPlayer?.dispose();
+    _ttsPlayer = null;
     WakelockPlus.disable();
     HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
     _scrollController.removeListener(_onScroll);
@@ -451,6 +457,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         ),
         actions: [
           IconButton(
+            tooltip: (_ttsPlayer?.active ?? false)
+                ? (_ttsPlayer!.playing ? '听书中，点按查看控制' : '听书已暂停，点按继续')
+                : '听书朗读',
+            icon: Icon(
+              (_ttsPlayer?.playing ?? false)
+                  ? Icons.record_voice_over
+                  : Icons.record_voice_over_outlined,
+              color: (_ttsPlayer?.active ?? false)
+                  ? theme.colorScheme.primary
+                  : null,
+            ),
+            onPressed: _openTtsSheet,
+          ),
+          IconButton(
             tooltip: _starred ? '取消收藏' : '收藏',
             icon: Icon(
               _starred ? Icons.star_rounded : Icons.star_outline_rounded,
@@ -551,6 +571,103 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             },
           ),
       bottomNavigationBar: _buildFooterNav(theme),
+    );
+  }
+
+  /// 听书控制面板（Roadmap「听书」）：懒创建播放器（段落从当前 Raw 源
+  /// 提取），面板关闭不中断朗读；离开阅读页自动停止。
+  Future<void> _openTtsSheet() async {
+    final raw = _rawSource;
+    if (raw == null || raw.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('内容尚未加载完成')));
+      return;
+    }
+    final paragraphs = markdownToSpeechParagraphs(raw);
+    if (paragraphs.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('没有可朗读的正文')));
+      return;
+    }
+    _ttsPlayer ??= TtsPlayer(paragraphs);
+    final player = _ttsPlayer!;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => AnimatedBuilder(
+        animation: player,
+        builder: (sheetContext, _) {
+          final theme = Theme.of(sheetContext);
+          final playing = player.playing;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    player.active
+                        ? '第 ${player.index + 1} / ${player.total} 段'
+                        : '共 ${player.total} 段（语速/音调在设置 → 阅读）',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    player.active ? player.paragraphs[player.index] : '',
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: '上一段',
+                        icon: const Icon(Icons.skip_previous_outlined),
+                        onPressed: player.prev,
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: () =>
+                            playing ? player.pause() : player.start(),
+                        icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                        label: Text(
+                          player.active
+                              ? (playing ? '暂停' : '继续')
+                              : '开始朗读',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        tooltip: '下一段',
+                        icon: const Icon(Icons.skip_next_outlined),
+                        onPressed: player.next,
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        tooltip: '停止',
+                        icon: const Icon(Icons.stop_outlined),
+                        onPressed: player.active ? player.stop : null,
+                      ),
+                    ],
+                  ),
+                  if (!player.active)
+                    Text(
+                      '朗读在打开本页时进行，离开文章自动停止',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 

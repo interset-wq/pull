@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../git/repo_meta.dart';
 import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
+import '../utils/reading_stats.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
 
 /// 应用发布页（GitCode Releases），供手动下载最新 APK 更新。
@@ -199,6 +200,102 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          // 本周阅读统计（Roadmap「检索与标注·阅读统计」）：纯本地
+          FutureBuilder<ReadingWeeklySummary>(
+            future: _weeklyStats(),
+            builder: (context, snap) {
+              final s = snap.data;
+              if (s == null) return const SizedBox.shrink();
+              return Card(
+                elevation: 0,
+                margin: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.insights_outlined,
+                              size: 18, color: theme.colorScheme.primary),
+                          const SizedBox(width: 6),
+                          Text('本周阅读', style: theme.textTheme.titleSmall),
+                          const Spacer(),
+                          Text(
+                            '${s.totalMinutes.round()} 分钟 · ${s.totalArticles} 篇',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // 近 7 天逐日条形（相对本周峰值），无数据的日不画条
+                      for (final d in s.days)
+                        if (d.minutes > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 76,
+                                  child: Text(
+                                    d.date.month == DateTime.now().month &&
+                                            d.date.day == DateTime.now().day
+                                        ? '今天'
+                                        : '${d.date.month}/${d.date.day}',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: FractionallySizedBox(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor:
+                                        (d.minutes / s.peakMinutes).clamp(
+                                      0.05,
+                                      1,
+                                    ),
+                                    child: Container(
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.primary
+                                            .withAlpha(80),
+                                        borderRadius:
+                                            BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  width: 72,
+                                  child: Text(
+                                    '${d.minutes.round()} 分钟 ${d.articles} 篇',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      if (s.totalMinutes == 0)
+                        Text(
+                          '最近 7 天还没有阅读记录',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 32),
           Text('应用图标', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -300,6 +397,13 @@ class SettingsPage extends StatelessWidget {
       ),
     );
     if (ok ?? false) onConfirm();
+  }
+
+  /// 近 7 天阅读统计（数据根与应用数据目录一致：docs/repos）。
+  Future<ReadingWeeklySummary> _weeklyStats() async {
+    final docs = await getApplicationDocumentsDirectory();
+    final root = '${docs.path}${Platform.pathSeparator}repos';
+    return ReadingStats.weeklySummary(root);
   }
 
   /// 在应用文档目录的 repos 根执行清空，并给出结果反馈。

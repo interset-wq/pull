@@ -37,6 +37,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # release 以 debug keystore 签名（build.gradle.kts 模板默认）。CI 的
+      # debug keystore 是随机生成的，与本地不一致会导致升级安装被拒——
+      # 恢复仓库 Secret 里的本机 keystore，保证两端签名同源。
+      - name: Restore signing keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+
       - name: Build arm64 release APK
         run: flutter build apk --split-per-abi --target-platform android-arm64
 

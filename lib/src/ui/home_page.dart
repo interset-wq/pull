@@ -46,7 +46,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 启动时后台静默更新所有仓库：不转圈、不弹提示，完成后仅刷新列表。
+  /// 受设置「自动拉取同步」开关控制（默认关闭——下拉刷新即可手动同步）。
   Future<void> _silentPullAll() async {
+    if (!(AppPrefs.instance?.silentPull ?? false)) return;
     // 等首轮仓库列表就绪再更新，避免与克隆/手动更新并发
     await _loadRepos();
     final repos = _repos;

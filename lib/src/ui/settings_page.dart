@@ -72,6 +72,19 @@ class SettingsPage extends StatelessWidget {
               onChanged: prefs.setDefaultOwner,
             ),
           ),
+          const SizedBox(height: 8),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.sync_outlined),
+              title: const Text('自动拉取同步'),
+              subtitle: const Text(
+                  '启动应用时后台静默 pull 所有仓库；默认关闭——下拉刷新或仓库页刷新按钮即可手动同步'),
+              value: prefs.silentPull,
+              onChanged: (v) => prefs.setSilentPull(v),
+            ),
+          ),
           const SizedBox(height: 32),
           Text('代码字体', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),

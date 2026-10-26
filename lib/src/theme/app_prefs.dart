@@ -38,6 +38,7 @@ class AppPrefs extends ChangeNotifier {
   static const _ignoreDefaultsKey = 'ignoreDefaults';
   static const _ignoreRulesKey = 'ignoreRules';
   static const _detailsExpandedKey = 'detailsExpanded';
+  static const _silentPullKey = 'silentPull';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -98,6 +99,11 @@ class AppPrefs extends ChangeNotifier {
   bool? _detailsExpanded;
   bool get detailsExpanded => _detailsExpanded ?? true;
 
+  // 启动时后台静默 pull 所有仓库：默认关闭——pull 逻辑简单，下拉刷新
+  // 即可手动同步，自动 pull 意义不大
+  bool? _silentPull;
+  bool get silentPull => _silentPull ?? false;
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -125,6 +131,7 @@ class AppPrefs extends ChangeNotifier {
     var ignoreDefaults = true;
     var ignoreRules = const <String>[];
     var detailsExpanded = true;
+    var silentPull = false;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -158,6 +165,7 @@ class AppPrefs extends ChangeNotifier {
       ignoreDefaults = sp.getBool(_ignoreDefaultsKey) ?? true;
       ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
       detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;
+      silentPull = sp.getBool(_silentPullKey) ?? false;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -178,6 +186,7 @@ class AppPrefs extends ChangeNotifier {
     prefs._ignoreDefaults = ignoreDefaults;
     prefs._ignoreRules = ignoreRules;
     prefs._detailsExpanded = detailsExpanded;
+    prefs._silentPull = silentPull;
     return _instance = prefs;
   }
 
@@ -351,6 +360,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_detailsExpandedKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setSilentPull(bool v) async {
+    if (v == silentPull) return;
+    _silentPull = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_silentPullKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

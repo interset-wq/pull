@@ -8,6 +8,7 @@ import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown/markdown.dart' as m;
 import 'package:markdown_widget/markdown_widget.dart';
+import 'package:mermaid_flutter/mermaid_flutter.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -1341,6 +1342,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       padding: EdgeInsets.zero,
       decoration: const BoxDecoration(),
       builder: (code, language) {
+        if (language.toLowerCase() == 'mermaid') {
+          return _MermaidBlockView(
+            code: code.trimRight(),
+            highlightTheme: highlightTheme,
+          );
+        }
         return _CodeBlockView(
           code: code.trimRight(),
           language: language,
@@ -1975,6 +1982,103 @@ class _LineNumberColumn extends StatelessWidget {
       ],
     );
   }
+}
+
+/// ```mermaid 围栏块：mermaid_flutter 原生渲染（纯 Dart 自绘，无 WebView）。
+/// 外观对齐代码块：左上语言标签 + 右上复制源码按钮；超宽图 FittedBox
+/// 缩放到屏宽；点按进全屏 MermaidView（pan/zoom/复位）。解析失败由
+/// errorBuilder 回退为高亮源码（最坏情况 = 原代码块展示）。
+class _MermaidBlockView extends StatelessWidget {
+  const _MermaidBlockView({
+    required this.code,
+    required this.highlightTheme,
+  });
+
+  final String code;
+  final Map<String, TextStyle> highlightTheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mermaidTheme = MaterialMermaidTheme.fromTheme(theme);
+    final codeStyle = currentCodeFontStyle().copyWith(fontSize: 13, height: 1.5);
+    return Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 24, left: 12, right: 12, bottom: 8),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openMermaidFullscreen(context, code),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.topLeft,
+              child: MermaidDiagram(
+                source: code,
+                theme: mermaidTheme,
+                errorBuilder: (context, error) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '图表解析失败：$error',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      HighlightView(
+                        code,
+                        language: 'mermaid',
+                        theme: highlightTheme,
+                        textStyle: codeStyle,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 4,
+          left: 12,
+          child: Text(
+            'mermaid',
+            style: currentCodeFontStyle().copyWith(
+              fontSize: 11,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          right: 0,
+          child: CopyButton(code: code),
+        ),
+      ],
+    );
+  }
+}
+
+/// mermaid 全屏查看：MermaidView 自带 pan/zoom/复位/全屏对话框。
+void _openMermaidFullscreen(BuildContext context, String code) {
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (context) => Scaffold(
+        appBar: AppBar(title: const Text('图表')),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: MermaidView(
+              source: code,
+              theme: MaterialMermaidTheme.fromTheme(Theme.of(context)),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// 按表独立的表格节点：复制包内 TableNode.build 的组装逻辑，但列宽档位

@@ -65,6 +65,7 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
     '.html': 'xml',
     '.css': 'css',
     '.scss': 'scss',
+    '.vue': 'vue',
     '.sql': 'sql',
     '.r': 'r',
     '.lua': 'lua',

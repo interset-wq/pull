@@ -1674,16 +1674,24 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
         height: 1.5,
       );
 
+  // highlight 包无 TSX/JSX 语法（未知语言静默回退纯文本），
+  // 解析时映射到最近似语法；标签仍显示原语言名
+  static const _langAlias = {
+    'tsx': 'typescript',
+    'jsx': 'javascript',
+  };
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final parseLang = _langAlias[widget.language] ?? widget.language;
     return LayoutBuilder(
       builder: (context, constraints) {
         // 真无界语境（表格内嵌等）：退化为纯高亮文本，收缩布局不崩
         if (!constraints.maxWidth.isFinite) {
           return HighlightView(
             widget.code,
-            language: widget.language,
+            language: parseLang,
             theme: widget.theme,
             padding: const EdgeInsets.only(top: 28, left: 12, right: 12, bottom: 4),
             textStyle: _codeStyle,
@@ -1712,7 +1720,7 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                   bottomPadding: 6,
                   child: HighlightView(
                     visibleCode,
-                    language: widget.language,
+                    language: parseLang,
                     theme: widget.theme,
                     padding: EdgeInsets.only(
                       top: 28,

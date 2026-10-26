@@ -14,6 +14,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Verify tag matches pubspec version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -23,8 +25,6 @@ jobs:
             echo "::error::tag ${GITHUB_REF_NAME} 与 pubspec.yaml version ${PUBSPEC_VERSION} 不一致——请先提交版本号改动再打 tag"
             exit 1
           fi
-
-      - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:

@@ -39,6 +39,7 @@ class AppPrefs extends ChangeNotifier {
   static const _ignoreRulesKey = 'ignoreRules';
   static const _ttsRateKey = 'ttsRate';
   static const _ttsPitchKey = 'ttsPitch';
+  static const _detailsExpandedKey = 'detailsExpanded';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -103,6 +104,10 @@ class AppPrefs extends ChangeNotifier {
   double? _ttsPitch;
   double get ttsPitch => _ttsPitch ?? 1.0;
 
+  // 折叠块（<details>）默认是否展开（未显式 open 时），默认展开
+  bool? _detailsExpanded;
+  bool get detailsExpanded => _detailsExpanded ?? true;
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -131,6 +136,7 @@ class AppPrefs extends ChangeNotifier {
     var ignoreRules = const <String>[];
     var ttsRate = 1.0;
     var ttsPitch = 1.0;
+    var detailsExpanded = true;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -165,6 +171,7 @@ class AppPrefs extends ChangeNotifier {
       ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
       ttsRate = (sp.getDouble(_ttsRateKey) ?? 1.0).clamp(0.5, 2.0);
       ttsPitch = (sp.getDouble(_ttsPitchKey) ?? 1.0).clamp(0.5, 2.0);
+      detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -186,6 +193,7 @@ class AppPrefs extends ChangeNotifier {
     prefs._ignoreRules = ignoreRules;
     prefs._ttsRate = ttsRate;
     prefs._ttsPitch = ttsPitch;
+    prefs._detailsExpanded = detailsExpanded;
     return _instance = prefs;
   }
 
@@ -374,6 +382,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setDouble(_ttsPitchKey, value);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setDetailsExpanded(bool v) async {
+    if (v == detailsExpanded) return;
+    _detailsExpanded = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_detailsExpandedKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

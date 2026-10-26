@@ -141,6 +141,18 @@ class SettingsPage extends StatelessWidget {
             animation: prefs,
             builder: (context, _) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.subject_outlined),
+              title: const Text('折叠块默认展开'),
+              subtitle: const Text(
+                  'Markdown 折叠块（<details>）未显式 open 时的默认展开状态'),
+              value: prefs.detailsExpanded,
+              onChanged: (v) => prefs.setDetailsExpanded(v),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.format_list_numbered_outlined),
               title: const Text('代码行号'),
               subtitle: const Text('代码块左侧显示行号列'),

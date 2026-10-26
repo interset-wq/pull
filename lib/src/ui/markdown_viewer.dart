@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
+import 'package:markdown/markdown.dart' as m;
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -186,6 +187,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   // 用户点过某表的右上角按钮后，该表不再自动切档。
   final Map<int, bool> _tableWrapOverrides = {};
   int _tableSeq = 0;
+  int _detailsSeq = 0;
 
   /// 表格 [index] 当前生效的换行档。
   bool _tableWraps(int index) =>
@@ -1103,6 +1105,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     // 表格序号在本次渲染的解析过程中递增分配；每次构建归零，保证同一
     // 文档的表格在重建间拿到稳定索引（_tableWrapOverrides 的 key）。
     _tableSeq = 0;
+    _detailsSeq = 0;
     final generator = MarkdownGenerator(
       inlineSyntaxList: [MathInlineSyntax(), MathBlockSyntax()],
       generators: [
@@ -1117,6 +1120,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               wraps: () => _tableWraps(index),
               onOverflow: (overflow) => _onTableOverflow(overflow, index),
               onToggle: () => _toggleTableMode(index),
+            );
+          },
+        ),
+        SpanNodeGeneratorWithTag(
+          tag: 'details',
+          // GFM 折叠块：可点击标题 + 递归渲染内部 Markdown。
+          // 展开初始值：open 属性优先，否则跟随「折叠块默认展开」设置
+          //（页面打开时读取，与其余设置开关一致）
+          generator: (element, config, visitor) {
+            final isOpen = element.attributes['open'] != null;
+            return _DetailsNode(
+              element,
+              index: _detailsSeq++,
+              initiallyExpanded:
+                  isOpen || (AppPrefs.instance?.detailsExpanded ?? true),
             );
           },
         ),
@@ -2068,6 +2086,140 @@ class _MarkdownTableHost extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// GFM 折叠块（&lt;details&gt;/&lt;summary&gt;）节点：标题可点击展开/收起，
+/// 内容按块级子节点递归渲染（内部代码块/表格/列表仍按正常样式显示）。
+/// 展开状态在 _DetailsBlockHost 的 State 中（稳定 ValueKey 保持元素身份，
+/// 文档重建不重置）；初始值由 open 属性或「折叠块默认展开」设置决定。
+class _DetailsNode extends ElementNode {
+  _DetailsNode(
+    this._element, {
+    required this.index,
+    required this.initiallyExpanded,
+  });
+
+  final m.Element _element;
+  final int index;
+  final bool initiallyExpanded;
+
+  /// summary 按 HTML 规范必须是第一个子元素。
+  bool get _hasSummary => _element.children
+          ?.any((c) => c is m.Element && c.tag == 'summary') ??
+      false;
+
+  String get _summaryText {
+    for (final c in _element.children ?? const <m.Node>[]) {
+      if (c is m.Element && c.tag == 'summary') {
+        return c.textContent;
+      }
+    }
+    return '';
+  }
+
+  @override
+  InlineSpan build() {
+    // 子节点顺序与元素子元素一致：有 summary 时跳过首节点（已渲染进标题）
+    final content =
+        _hasSummary ? children.skip(1).toList() : List.of(children);
+    return WidgetSpan(
+      child: _DetailsBlockHost(
+        key: ValueKey('details-$index'),
+        summary: _summaryText,
+        initiallyExpanded: initiallyExpanded,
+        contentNodes: content,
+      ),
+    );
+  }
+
+  @override
+  TextStyle? get style => parentStyle;
+}
+
+/// 折叠块外壳（有状态组件：展开状态在自身 State，稳定 ValueKey 保证
+/// 元素身份，点击只重建本组件）。
+class _DetailsBlockHost extends StatefulWidget {
+  const _DetailsBlockHost({
+    super.key,
+    required this.summary,
+    required this.initiallyExpanded,
+    required this.contentNodes,
+  });
+
+  final String summary;
+  final bool initiallyExpanded;
+  final List<SpanNode> contentNodes;
+
+  @override
+  State<_DetailsBlockHost> createState() => _DetailsBlockHostState();
+}
+
+class _DetailsBlockHostState extends State<_DetailsBlockHost> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withAlpha(70),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    _expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.summary.isEmpty ? '（折叠内容）' : widget.summary,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < widget.contentNodes.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 8),
+                    RichText(
+                      text: widget.contentNodes[i].build(),
+                      textScaler: MediaQuery.textScalerOf(context),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

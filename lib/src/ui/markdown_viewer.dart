@@ -1868,34 +1868,40 @@ class _MermaidBlockView extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 24, left: 12, right: 12, bottom: 8),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _openMermaidFullscreen(context, code),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.topLeft,
-              child: MermaidDiagram(
-                source: code,
-                theme: mermaidTheme,
-                errorBuilder: (context, error) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '图表解析失败：$error',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.error,
+          // 正文是 SingleChildScrollView（非懒加载），滚动帧会重记录整页
+          // 绘制命令；图表是几百条 Path/Text 的手绘场景，不加边界缓存时
+          // 每个滚动帧都重跑 paint，明显卡顿。RepaintBoundary 让引擎把
+          // 绘制结果缓存为图层，滚动只做合成偏移。
+          child: RepaintBoundary(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _openMermaidFullscreen(context, code),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.topLeft,
+                child: MermaidDiagram(
+                  source: code,
+                  theme: mermaidTheme,
+                  errorBuilder: (context, error) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '图表解析失败：$error',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      HighlightView(
-                        code,
-                        language: 'mermaid',
-                        theme: highlightTheme,
-                        textStyle: codeStyle,
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        HighlightView(
+                          code,
+                          language: 'mermaid',
+                          theme: highlightTheme,
+                          textStyle: codeStyle,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

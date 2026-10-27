@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  gal
   git2dart_binaries
   share_plus
   url_launcher_windows

@@ -3,11 +3,13 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
+import 'package:gal/gal.dart';
 import 'package:markdown/markdown.dart' as m;
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:mermaid_flutter/mermaid_flutter.dart';
@@ -209,6 +211,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 布局整篇，边界离屏图层即完整长文，滚动位置不影响截取。
   final GlobalKey _bodyCaptureKey = GlobalKey();
   bool _exportingImage = false;
+
+  /// 导出长图期间的强制展开信号（Roadmap「导出与分享·导出长图」）：
+  /// 截图截的是当前视图状态，折叠代码/折叠块若保持收起，长图里就是缺失的；
+  /// 置 true 让所有折叠区临时展开，截图完成后复位（用户手动展开的不受影响）。
+  final ValueNotifier<bool> _forceExpand = ValueNotifier(false);
   DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 滚动进度（0~1），驱动 AppBar 底部的细进度条。
@@ -271,6 +278,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _scrollController.dispose();
     _currentSection.dispose();
     _progressNotifier.dispose();
+    _forceExpand.dispose();
     super.dispose();
   }
 
@@ -608,6 +616,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 导出长图（Roadmap「导出与分享·导出长图」）：整篇正文截取为一张 PNG
   /// 并调起系统分享（微信/QQ 等直接选会话发送）。正文为非懒加载 Column，
   /// RepaintBoundary 离屏图层即完整内容，与滚动位置无关。
+  ///
+  /// 截图截的是当前视图状态：导出前先置位强制展开信号（折叠代码/折叠块
+  /// 全部展开），两帧稳定后截图，完成后复位——用户手动展开的状态不受影响。
+  /// 产物同时存入系统相册「PullRead」（保存失败不阻断分享）。
   Future<void> _exportLongImage() async {
     if (_exportingImage) return;
     final boundary = _bodyCaptureKey.currentContext?.findRenderObject();
@@ -616,15 +628,18 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     final messenger = ScaffoldMessenger.of(context);
     // dpr 在首个 await 前采集：避免跨 async gap 使用 context
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    ui.Image? image;
     try {
-      // 表格/mermaid 首帧测量可能落在当前帧之后：等一帧再截，避免截到半成品
+      // 强制展开全部折叠区，等两帧让重排（含表格/mermaid 重测量）完成：
+      // 第一帧应用展开，第二帧确保整体布局落定，再取最终高度
+      _forceExpand.value = true;
+      await WidgetsBinding.instance.endOfFrame;
       await WidgetsBinding.instance.endOfFrame;
       // GPU 纹理高度上限（保守值）：超高长图先预降采样，否则 toImage
       // 直接失败或产出被裁剪的坏图
       const maxTexture = 16384.0;
       final target = boundary.size.height * dpr;
       var ratio = target > maxTexture ? dpr * maxTexture / target : dpr;
-      ui.Image? image;
       for (var attempt = 0; attempt < 4; attempt++) {
         try {
           final img = await boundary.toImage(pixelRatio: ratio);
@@ -644,13 +659,52 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         throw Exception('内容过长，已降到最低清晰度仍无法生成');
       }
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
       if (bytes == null) throw Exception('PNG 编码失败');
+      final png = bytes.buffer.asUint8List();
+      // 尽快还原视图状态，再走保存/分享的慢 IO
+      _forceExpand.value = false;
+      await WidgetsBinding.instance.endOfFrame;
+      // 存入系统相册「PullRead」（gal 自动按 PNG 推导扩展名）；
+      // 保存失败（如拒绝权限）只提示，不阻断分享
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      var savedToGallery = false;
+      var galleryDenied = false;
+      try {
+        if (await Gal.hasAccess(toAlbum: true)) {
+          await Gal.putImageBytes(
+            png,
+            album: 'PullRead',
+            name: 'pullread-$stamp',
+          );
+          savedToGallery = true;
+        } else {
+          await Gal.requestAccess(toAlbum: true);
+          if (await Gal.hasAccess(toAlbum: true)) {
+            await Gal.putImageBytes(
+              png,
+              album: 'PullRead',
+              name: 'pullread-$stamp',
+            );
+            savedToGallery = true;
+          } else {
+            galleryDenied = true;
+          }
+        }
+      } on GalException {
+        galleryDenied = true;
+      }
+      if (savedToGallery) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('已保存到相册「PullRead」')),
+        );
+      } else if (galleryDenied) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('未获得相册权限，仅生成分享文件')),
+        );
+      }
       final dir = await getTemporaryDirectory();
-      final file = File(
-        '${dir.path}/pullread-${DateTime.now().millisecondsSinceEpoch}.png',
-      );
-      await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+      final file = File('${dir.path}/pullread-$stamp.png');
+      await file.writeAsBytes(png, flush: true);
       await SharePlus.instance.share(
         ShareParams(files: [XFile(file.path)], text: _title),
       );
@@ -665,6 +719,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     } on Object catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
     } finally {
+      // 兜底还原：任何提前 return/异常路径都不得把页面留在强制展开态
+      _forceExpand.value = false;
       if (mounted) setState(() => _exportingImage = false);
     }
   }
@@ -1091,6 +1147,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
               index: _detailsSeq++,
               initiallyExpanded:
                   isOpen || (AppPrefs.instance?.detailsExpanded ?? true),
+              forceExpand: _forceExpand,
             );
           },
         ),
@@ -1341,6 +1398,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           lineNumbers: prefs?.codeLineNumbers ?? true,
           foldEnabled: prefs?.codeFoldEnabled ?? true,
           foldThreshold: prefs?.codeFoldThreshold ?? 30,
+          forceExpand: _forceExpand,
         );
       },
     );
@@ -1791,6 +1849,7 @@ class _CodeBlockView extends StatefulWidget {
     required this.lineNumbers,
     required this.foldEnabled,
     required this.foldThreshold,
+    required this.forceExpand,
   });
 
   final String code;
@@ -1799,6 +1858,9 @@ class _CodeBlockView extends StatefulWidget {
   final bool lineNumbers;
   final bool foldEnabled;
   final int foldThreshold;
+
+  /// 导出长图期间的强制展开信号（宿主页持有）
+  final ValueListenable<bool> forceExpand;
 
   @override
   State<_CodeBlockView> createState() => _CodeBlockViewState();
@@ -1838,17 +1900,24 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
         final lines = widget.code.split('\n');
         final total = lines.length;
         final foldable = widget.foldEnabled && total > widget.foldThreshold;
-        final folded = foldable && !_expanded;
-        final visibleCode =
-            folded ? lines.take(widget.foldThreshold).join('\n') : widget.code;
-        final gutterLines = folded ? widget.foldThreshold : total;
         final label = widget.language.isNotEmpty ? widget.language : 'text';
         // 代码区背景 = 高亮主题 root 背景（github #f8f8f8 / atomOneDark #282c34）。
         // 行号列必须用同一颜色：页面 surface 色与之不同，会在左侧形成竖条，
         // 和右上语言标签行拼成"7"形色差
         final codeBg = widget.theme['root']?.backgroundColor ??
             theme.colorScheme.surface;
-        return Column(
+        // 强制展开信号（导出长图）与用户点按共用一次重建；折叠判定放
+        // 监听内部，信号翻转即重建出展开后的完整内容
+        return ValueListenableBuilder<bool>(
+          valueListenable: widget.forceExpand,
+          builder: (context, forceExpand, _) {
+          final expanded = _expanded || forceExpand;
+          final folded = foldable && !expanded;
+          final visibleCode = folded
+              ? lines.take(widget.foldThreshold).join('\n')
+              : widget.code;
+          final gutterLines = folded ? widget.foldThreshold : total;
+          return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Stack(
@@ -1922,7 +1991,7 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        _expanded
+                        expanded
                             ? Icons.keyboard_arrow_up
                             : Icons.keyboard_arrow_down,
                         size: 16,
@@ -1930,7 +1999,7 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _expanded ? '收起' : '展开全部 $total 行',
+                        expanded ? '收起' : '展开全部 $total 行',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.primary,
                         ),
@@ -1940,6 +2009,8 @@ class _CodeBlockViewState extends State<_CodeBlockView> {
                 ),
               ),
           ],
+          );
+          },
         );
       },
     );
@@ -2195,11 +2266,15 @@ class _DetailsNode extends ElementNode {
     this._element, {
     required this.index,
     required this.initiallyExpanded,
+    required this.forceExpand,
   });
 
   final m.Element _element;
   final int index;
   final bool initiallyExpanded;
+
+  /// 导出长图期间的强制展开信号（宿主页持有）
+  final ValueListenable<bool> forceExpand;
 
   /// summary 按 HTML 规范必须是第一个子元素。
   bool get _hasSummary => _element.children
@@ -2225,6 +2300,7 @@ class _DetailsNode extends ElementNode {
         key: ValueKey('details-$index'),
         summary: _summaryText,
         initiallyExpanded: initiallyExpanded,
+        forceExpand: forceExpand,
         contentNodes: content,
       ),
     );
@@ -2241,11 +2317,15 @@ class _DetailsBlockHost extends StatefulWidget {
     super.key,
     required this.summary,
     required this.initiallyExpanded,
+    required this.forceExpand,
     required this.contentNodes,
   });
 
   final String summary;
   final bool initiallyExpanded;
+
+  /// 导出长图期间的强制展开信号（宿主页持有）
+  final ValueListenable<bool> forceExpand;
   final List<SpanNode> contentNodes;
 
   @override
@@ -2254,6 +2334,24 @@ class _DetailsBlockHost extends StatefulWidget {
 
 class _DetailsBlockHostState extends State<_DetailsBlockHost> {
   late bool _expanded = widget.initiallyExpanded;
+
+  // 导出长图强制展开：信号翻转即整体重建（还原由宿主复位信号触发）；
+  // 展示状态 = 用户展开或强制展开期间
+  bool get _shown => _expanded || widget.forceExpand.value;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.forceExpand.addListener(_refreshOnForceExpand);
+  }
+
+  void _refreshOnForceExpand() => setState(() {});
+
+  @override
+  void dispose() {
+    widget.forceExpand.removeListener(_refreshOnForceExpand);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2278,7 +2376,7 @@ class _DetailsBlockHostState extends State<_DetailsBlockHost> {
               child: Row(
                 children: [
                   Icon(
-                    _expanded ? Icons.expand_more : Icons.chevron_right,
+                    _shown ? Icons.expand_more : Icons.chevron_right,
                     size: 18,
                     color: theme.colorScheme.primary,
                   ),
@@ -2297,7 +2395,7 @@ class _DetailsBlockHostState extends State<_DetailsBlockHost> {
               ),
             ),
           ),
-          if (_expanded)
+          if (_shown)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               child: Column(

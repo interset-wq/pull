@@ -86,6 +86,19 @@ class SettingsPage extends StatelessWidget {
               onChanged: (v) => prefs.setSilentPull(v),
             ),
           ),
+          const SizedBox(height: 8),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.account_tree_outlined),
+              title: const Text('目录树模式'),
+              subtitle: const Text(
+                  '仓库页目录就地展开/折叠，一页看全整个仓库；默认关闭——点目录逐级进入（类似文件资源管理器），指向目录的链接可正常跳转'),
+              value: prefs.treeMode,
+              onChanged: (v) => prefs.setTreeMode(v),
+            ),
+          ),
           const SizedBox(height: 32),
           Text('代码字体', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),

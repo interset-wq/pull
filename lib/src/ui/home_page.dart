@@ -798,6 +798,32 @@ class _RepoPageState extends State<RepoPage> {
     setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
   }
 
+  /// 经典模式：当前目录下的子文件夹（应用 ignore 规则），排序后返回名称。
+  List<String> _subDirs() {
+    if (!mounted) return const [];
+    final dir = _currentDir;
+    if (!dir.existsSync()) return const [];
+    return dir
+        .listSync(followLinks: false)
+        .whereType<Directory>()
+        .map((d) => d.path.split(Platform.pathSeparator).last)
+        .where((name) => !_scanner.isIgnored(name))
+        .toList()
+      ..sort(compareNatural);
+  }
+
+  /// 经典模式：当前目录下的 Markdown 笔记。
+  List<NoteFile> _localNotes() {
+    final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
+    return (_allNotes ?? const <NoteFile>[])
+        .where((n) => n.relativePath.startsWith(prefix))
+        .where((n) => !n.relativePath
+            .substring(prefix.length)
+            .contains('/'))
+        .toList()
+      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+  }
+
   /// 构建目录树条目：目录行就地展开/折叠（_expandedDirs 控制），
   /// 文件行点击打开。展开的目录递归展开下一层（缩进按层级递增）。
   List<_TreeEntry> _treeEntries() {
@@ -858,9 +884,17 @@ class _RepoPageState extends State<RepoPage> {
         ? repoName
         : widget.subPath.split('/').last;
 
-    final entries = searching ? null : _treeEntries();
-    final notes = searching ? _searchAll() : const <NoteFile>[];
-    final isEmpty = searching ? notes.isEmpty : entries!.isEmpty;
+    // 树模式（设置开关，默认关）：目录就地展开/折叠；经典模式（默认）：
+    // 点目录进入下一页（类似文件资源管理器），目录保留独立路由，
+    // 指向目录的本地链接可正常跳转
+    final treeMode =
+        !searching && (AppPrefs.instance?.treeMode ?? false);
+    final notes = searching ? _searchAll() : _localNotes();
+    final dirs = treeMode ? const <String>[] : _subDirs();
+    final entries = treeMode ? _treeEntries() : null;
+    final isEmpty = treeMode
+        ? entries!.isEmpty
+        : dirs.isEmpty && notes.isEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -952,94 +986,161 @@ class _RepoPageState extends State<RepoPage> {
                               ),
                           ],
                         )
-                      // 目录模式：就地展开/折叠的目录树
-                      : ListView(
-                          padding: const EdgeInsets.only(bottom: 32),
-                          children: [
-                            for (final entry in entries!)
-                              if (entry.isDir)
-                                ListTile(
-                                  dense: true,
-                                  minVerticalPadding: 4,
-                                  contentPadding: EdgeInsets.only(
-                                    left: 16 + entry.depth * 20.0,
-                                    right: 16,
-                                  ),
-                                  leading: Icon(
-                                    _expandedDirs.contains(entry.dirRel)
-                                        ? Icons.folder_open_outlined
-                                        : Icons.folder_outlined,
-                                    color: theme.colorScheme.primary,
-                                    size: 22,
-                                  ),
-                                  title: Text(
-                                    entry.name!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodyMedium,
-                                  ),
-                                  trailing: Icon(
-                                    _expandedDirs.contains(entry.dirRel)
-                                        ? Icons.expand_less
-                                        : Icons.expand_more,
-                                    size: 18,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                  onTap: () => setState(() {
-                                    if (!_expandedDirs
-                                        .remove(entry.dirRel!)) {
-                                      _expandedDirs.add(entry.dirRel!);
-                                    }
-                                  }),
-                                )
-                              else if (entry.isEmptyPlaceholder)
-                                Padding(
-                                  padding: EdgeInsets.only(
-                                    left: 16 + entry.depth * 20.0 + 46,
-                                    top: 6,
-                                    bottom: 6,
-                                  ),
-                                  child: Text(
-                                    '空目录',
-                                    style: theme.textTheme.bodySmall
-                                        ?.copyWith(
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
+                      // 树模式（设置开关开启时）：就地展开/折叠的目录树
+                      : treeMode
+                          ? ListView(
+                              padding: const EdgeInsets.only(bottom: 32),
+                              children: [
+                                for (final entry in entries!)
+                                  if (entry.isDir)
+                                    ListTile(
+                                      dense: true,
+                                      minVerticalPadding: 4,
+                                      contentPadding: EdgeInsets.only(
+                                        left: 16 + entry.depth * 20.0,
+                                        right: 16,
+                                      ),
+                                      leading: Icon(
+                                        _expandedDirs
+                                                .contains(entry.dirRel)
+                                            ? Icons.folder_open_outlined
+                                            : Icons.folder_outlined,
+                                        color: theme.colorScheme.primary,
+                                        size: 22,
+                                      ),
+                                      title: Text(
+                                        entry.name!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodyMedium,
+                                      ),
+                                      trailing: Icon(
+                                        _expandedDirs
+                                                .contains(entry.dirRel)
+                                            ? Icons.expand_less
+                                            : Icons.expand_more,
+                                        size: 18,
+                                        color: theme
+                                            .colorScheme.onSurfaceVariant,
+                                      ),
+                                      onTap: () => setState(() {
+                                        if (!_expandedDirs
+                                            .remove(entry.dirRel!)) {
+                                          _expandedDirs.add(entry.dirRel!);
+                                        }
+                                      }),
+                                    )
+                                  else if (entry.isEmptyPlaceholder)
+                                    Padding(
+                                      padding: EdgeInsets.only(
+                                        left: 16 + entry.depth * 20.0 + 46,
+                                        top: 6,
+                                        bottom: 6,
+                                      ),
+                                      child: Text(
+                                        '空目录',
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          color: theme
+                                              .colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    ListTile(
+                                      dense: true,
+                                      minVerticalPadding: 4,
+                                      // 与同层目录行同缩进（不再额外 +22，
+                                      // 保证"目录与文件混排"时左侧对齐）
+                                      contentPadding: EdgeInsets.only(
+                                        left: 16 + entry.depth * 20.0,
+                                        right: 16,
+                                      ),
+                                      leading: Icon(
+                                        entry.note!.isMarkdown
+                                            ? Icons.description_outlined
+                                            : entry.note!.isImage
+                                                ? Icons.image_outlined
+                                                : Icons.code_outlined,
+                                        color: entry.note!.isMarkdown
+                                            ? theme.colorScheme
+                                                .onSurfaceVariant
+                                            : entry.note!.isImage
+                                                ? theme.colorScheme.tertiary
+                                                : theme
+                                                    .colorScheme.secondary,
+                                        size: 22,
+                                      ),
+                                      title: Text(
+                                        '${entry.note!.fileName}${entry.note!.extension}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodyMedium,
+                                      ),
+                                      onTap: () => _openFile(entry.note!),
+                                    ),
+                              ],
+                            )
+                          // 经典模式（默认）：点目录进入下一页，
+                          // 类似文件资源管理器；目录保留独立路由
+                          : ListView(
+                              padding: const EdgeInsets.only(bottom: 32),
+                              children: [
+                                for (final name in dirs)
+                                  ListTile(
+                                    dense: true,
+                                    minVerticalPadding: 4,
+                                    leading: Icon(
+                                      Icons.folder_outlined,
+                                      color: theme.colorScheme.primary,
+                                      size: 22,
+                                    ),
+                                    title: Text(
+                                      name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => RepoPage(
+                                          repoDir: widget.repoDir,
+                                          subPath: widget.subPath.isEmpty
+                                              ? name
+                                              : '${widget.subPath}/$name',
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                )
-                              else
-                                ListTile(
-                                  dense: true,
-                                  minVerticalPadding: 4,
-                                  contentPadding: EdgeInsets.only(
-                                    left: 16 + entry.depth * 20.0 + 22,
-                                    right: 16,
+                                for (final note in notes)
+                                  ListTile(
+                                    dense: true,
+                                    minVerticalPadding: 4,
+                                    leading: Icon(
+                                      note.isMarkdown
+                                          ? Icons.description_outlined
+                                          : note.isImage
+                                              ? Icons.image_outlined
+                                              : Icons.code_outlined,
+                                      color: note.isMarkdown
+                                          ? theme
+                                              .colorScheme.onSurfaceVariant
+                                          : note.isImage
+                                              ? theme.colorScheme.tertiary
+                                              : theme.colorScheme.secondary,
+                                      size: 22,
+                                    ),
+                                    title: Text(
+                                      '${note.fileName}${note.extension}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                    onTap: () => _openFile(note),
                                   ),
-                                  leading: Icon(
-                                    entry.note!.isMarkdown
-                                        ? Icons.description_outlined
-                                        : entry.note!.isImage
-                                            ? Icons.image_outlined
-                                            : Icons.code_outlined,
-                                    color: entry.note!.isMarkdown
-                                        ? theme
-                                            .colorScheme.onSurfaceVariant
-                                        : entry.note!.isImage
-                                            ? theme.colorScheme.tertiary
-                                            : theme.colorScheme.secondary,
-                                    size: 22,
-                                  ),
-                                  title: Text(
-                                    '${entry.note!.fileName}${entry.note!.extension}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodyMedium,
-                                  ),
-                                  onTap: () => _openFile(entry.note!),
-                                ),
-                          ],
-                        ),
+                              ],
+                            ),
             ),
           ),
         ],

@@ -39,6 +39,7 @@ class AppPrefs extends ChangeNotifier {
   static const _ignoreRulesKey = 'ignoreRules';
   static const _detailsExpandedKey = 'detailsExpanded';
   static const _silentPullKey = 'silentPull';
+  static const _treeModeKey = 'treeMode';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -104,6 +105,12 @@ class AppPrefs extends ChangeNotifier {
   bool? _silentPull;
   bool get silentPull => _silentPull ?? false;
 
+  // 仓库页目录树模式：目录就地展开/折叠。默认关闭——经典模式（点目录
+  // 进入下一页，类似文件资源管理器）才是主要导航方式，树模式下目录
+  // 没有独立路由，指向目录的本地链接无法跳转
+  bool? _treeMode;
+  bool get treeMode => _treeMode ?? false;
+
   // 应用图标：'book'（摊开书，默认）/ 'page'（页即箭）/ 'arrow'（抽页成箭）
   String? _appIcon;
   String get appIcon =>
@@ -132,6 +139,7 @@ class AppPrefs extends ChangeNotifier {
     var ignoreRules = const <String>[];
     var detailsExpanded = true;
     var silentPull = false;
+    var treeMode = false;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -166,6 +174,7 @@ class AppPrefs extends ChangeNotifier {
       ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
       detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;
       silentPull = sp.getBool(_silentPullKey) ?? false;
+      treeMode = sp.getBool(_treeModeKey) ?? false;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -187,6 +196,7 @@ class AppPrefs extends ChangeNotifier {
     prefs._ignoreRules = ignoreRules;
     prefs._detailsExpanded = detailsExpanded;
     prefs._silentPull = silentPull;
+    prefs._treeMode = treeMode;
     return _instance = prefs;
   }
 
@@ -373,6 +383,19 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setBool(_silentPullKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setTreeMode(bool v) async {
+    if (v == treeMode) return;
+    _treeMode = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_treeModeKey, v);
     } on Object {
       // 保存失败不影响本次会话
     }

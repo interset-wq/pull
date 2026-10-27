@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
@@ -9,7 +11,9 @@ import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown/markdown.dart' as m;
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:mermaid_flutter/mermaid_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -199,6 +203,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   final _currentSection = ValueNotifier<int>(-1);
   final List<GlobalKey> _headingKeys = [];
   final GlobalKey _viewportKey = GlobalKey();
+
+  /// 长图导出的重绘边界（Roadmap「导出与分享·导出长图」）：包裹正文内容
+  /// （面包屑 + 渲染结果，不含文末导航）。正文为非懒加载 Column，一次
+  /// 布局整篇，边界离屏图层即完整长文，滚动位置不影响截取。
+  final GlobalKey _bodyCaptureKey = GlobalKey();
+  bool _exportingImage = false;
   DateTime _lastSectionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 滚动进度（0~1），驱动 AppBar 底部的细进度条。
@@ -477,6 +487,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   _copyFullText();
                 case 'copyText':
                   _copyPlainText();
+                case 'exportImage':
+                  _exportLongImage();
               }
             },
             itemBuilder: (_) => [
@@ -493,6 +505,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 value: 'copyText',
                 child: Text('复制全文（纯文本）'),
               ),
+              // raw 模式下没有渲染内容，长图无从截取
+              if (!_showRaw)
+                const PopupMenuItem(value: 'exportImage', child: Text('导出长图')),
             ],
           ),
         ],
@@ -500,6 +515,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 长图导出进行中：FAB 位显示进度（生成整篇 PNG 可能需要一两秒）
+          if (_exportingImage) ...[
+            const FloatingActionButton.small(
+              heroTag: 'exporting',
+              tooltip: '正在生成长图',
+              onPressed: null,
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           // raw 模式下没有渲染锚点，不提供目录
           if (!_showRaw) ...[
             FloatingActionButton.small(
@@ -573,6 +602,70 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已复制全文（纯文本）')));
+    }
+  }
+
+  /// 导出长图（Roadmap「导出与分享·导出长图」）：整篇正文截取为一张 PNG
+  /// 并调起系统分享（微信/QQ 等直接选会话发送）。正文为非懒加载 Column，
+  /// RepaintBoundary 离屏图层即完整内容，与滚动位置无关。
+  Future<void> _exportLongImage() async {
+    if (_exportingImage) return;
+    final boundary = _bodyCaptureKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) return;
+    setState(() => _exportingImage = true);
+    final messenger = ScaffoldMessenger.of(context);
+    // dpr 在首个 await 前采集：避免跨 async gap 使用 context
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    try {
+      // 表格/mermaid 首帧测量可能落在当前帧之后：等一帧再截，避免截到半成品
+      await WidgetsBinding.instance.endOfFrame;
+      // GPU 纹理高度上限（保守值）：超高长图先预降采样，否则 toImage
+      // 直接失败或产出被裁剪的坏图
+      const maxTexture = 16384.0;
+      final target = boundary.size.height * dpr;
+      var ratio = target > maxTexture ? dpr * maxTexture / target : dpr;
+      ui.Image? image;
+      for (var attempt = 0; attempt < 4; attempt++) {
+        try {
+          final img = await boundary.toImage(pixelRatio: ratio);
+          final want = (boundary.size.height * ratio).round();
+          if ((img.height - want).abs() <= 2) {
+            image = img;
+            break;
+          }
+          // 极端设备上 toImage 不抛异常但按上限裁剪：高度不符即重来
+          img.dispose();
+        } on Object {
+          // 纹理超限：降采样重试
+        }
+        ratio /= 2;
+      }
+      if (image == null) {
+        throw Exception('内容过长，已降到最低清晰度仍无法生成');
+      }
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (bytes == null) throw Exception('PNG 编码失败');
+      final dir = await getTemporaryDirectory();
+      final file = File(
+        '${dir.path}/pullread-${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(file.path)], text: _title),
+      );
+      // 分享面板拉起后临时文件即可清理（延迟留给慢加载的接收方）
+      Future<void>.delayed(const Duration(minutes: 5), () {
+        try {
+          if (file.existsSync()) file.deleteSync();
+        } on Object {
+          // 清理失败无碍
+        }
+      });
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    } finally {
+      if (mounted) setState(() => _exportingImage = false);
     }
   }
 
@@ -1084,10 +1177,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       }
     }
     // 文末导航：回到上级目录 / 仓库首页，替代纯留白
-    children
-      ..add(const Divider(height: 32))
-      ..add(_buildEndNav(theme))
-      ..add(const SizedBox(height: 90));
+    // 文末导航不进长图：放在重绘边界之外，导出图只含正文内容
+    final tail = <Widget>[
+      const Divider(height: 32),
+      _buildEndNav(theme),
+      const SizedBox(height: 90),
+    ];
     return GestureDetector(
       // 手势翻页默认关闭（设置页可开）：横滑易与代码块/表格的横向滚动混淆
       onHorizontalDragEnd:
@@ -1101,21 +1196,48 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         child: SingleChildScrollView(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: AppPrefs.instance?.pageMargin ?? 16,
-            ),
-            // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/桌面窗口下
-            // 正文限宽居中，不拉满全屏；窄屏下 maxWidth 不起作用
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 860),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: children,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 长图导出边界：垫底页面背景色（避免透明 PNG 在聊天工具里
+              // 显示异常），整篇内容一次布局在边界内
+              RepaintBoundary(
+                key: _bodyCaptureKey,
+                child: ColoredBox(
+                  color: theme.scaffoldBackgroundColor,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: AppPrefs.instance?.pageMargin ?? 16,
+                    ),
+                    // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/
+                    // 桌面窗口下正文限宽居中，不拉满全屏；窄屏下不起作用
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 860),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: children,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: AppPrefs.instance?.pageMargin ?? 16,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 860),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: tail,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

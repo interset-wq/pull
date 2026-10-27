@@ -177,6 +177,46 @@ class SettingsPage extends StatelessWidget {
           ),
           AnimatedBuilder(
             animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.format_line_spacing_outlined),
+              title: const Text('正文行距'),
+              subtitle: Text('行高倍数 ${prefs.lineHeight.toStringAsFixed(2)}'),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.lineHeight,
+                  min: 1.4,
+                  max: 2.2,
+                  divisions: 16, // 0.05 步进（默认 1.75 必须落在档位上）
+                  label: prefs.lineHeight.toStringAsFixed(2),
+                  onChanged: (v) => prefs.setLineHeight(v),
+                ),
+              ),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.settings_overscan_outlined),
+              title: const Text('页边距'),
+              subtitle: Text('正文两侧留白 ${prefs.pageMargin.round()} dp'),
+              trailing: SizedBox(
+                width: 140,
+                child: Slider(
+                  value: prefs.pageMargin,
+                  min: 8,
+                  max: 32,
+                  divisions: 12, // 2 dp 步进
+                  label: '${prefs.pageMargin.round()}',
+                  onChanged: (v) => prefs.setPageMargin(v),
+                ),
+              ),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: prefs,
             builder: (context, _) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.format_list_numbered_outlined),

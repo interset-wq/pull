@@ -30,6 +30,8 @@ class AppPrefs extends ChangeNotifier {
   static const _keepScreenOnKey = 'keepScreenOn';
   static const _codeLineNumbersKey = 'codeLineNumbers';
   static const _codeFoldThresholdKey = 'codeFoldThreshold';
+  static const _lineHeightKey = 'lineHeight';
+  static const _pageMarginKey = 'pageMargin';
   static const _codeFoldEnabledKey = 'codeFoldEnabled';
   static const _recentsLimitKey = 'recentsLimit';
   static const _appIconKey = 'appIcon';
@@ -66,6 +68,15 @@ class AppPrefs extends ChangeNotifier {
 
   int? _codeFoldThreshold;
   int get codeFoldThreshold => _codeFoldThreshold ?? 30;
+
+  // 阅读排版：正文行距（倍数，默认 1.75）与水平页边距（逻辑像素，默认 16）。
+  // 同 codeLineNumbers：热重载会保留无此参数的旧实例（字段为 null），
+  // getter 兜底默认值，set 前用 getter 比较
+  double? _lineHeight;
+  double get lineHeight => _lineHeight ?? 1.75;
+
+  double? _pageMargin;
+  double get pageMargin => _pageMargin ?? 16;
 
   // 同 codeLineNumbers：热重载会保留无此参数的旧实例（字段为 null），
   // getter 兜底默认值，set 前用 getter 比较
@@ -130,6 +141,8 @@ class AppPrefs extends ChangeNotifier {
     var keepScreenOn = false;
     var codeLineNumbers = true;
     var codeFoldThreshold = 30;
+    var lineHeight = 1.75;
+    var pageMargin = 16.0;
     var codeFoldEnabled = true;
     var recentsLimit = 5;
     var appIcon = 'book';
@@ -165,6 +178,8 @@ class AppPrefs extends ChangeNotifier {
         _ => true,
       };
       codeFoldThreshold = sp.getInt(_codeFoldThresholdKey) ?? 30;
+      lineHeight = (sp.getDouble(_lineHeightKey) ?? 1.75).clamp(1.4, 2.2);
+      pageMargin = (sp.getDouble(_pageMarginKey) ?? 16.0).clamp(8.0, 32.0);
       codeFoldEnabled = sp.getBool(_codeFoldEnabledKey) ?? true;
       recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
       appIcon = sp.getString(_appIconKey) ?? 'book';
@@ -190,6 +205,8 @@ class AppPrefs extends ChangeNotifier {
       recentsLimit,
     );
     prefs._appIcon = appIcon;
+    prefs._lineHeight = lineHeight;
+    prefs._pageMargin = pageMargin;
     prefs._swipePaging = swipePaging;
     prefs._wideTable = wideTable;
     prefs._ignoreDefaults = ignoreDefaults;
@@ -264,6 +281,34 @@ class AppPrefs extends ChangeNotifier {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
       await sp.setInt(_codeFoldThresholdKey, value);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setLineHeight(double v) async {
+    final value = v.clamp(1.4, 2.2);
+    if (value == lineHeight) return;
+    _lineHeight = value;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setDouble(_lineHeightKey, value);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  Future<void> setPageMargin(double v) async {
+    final value = v.clamp(8.0, 32.0);
+    if (value == pageMargin) return;
+    _pageMargin = value;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setDouble(_pageMarginKey, value);
     } on Object {
       // 保存失败不影响本次会话
     }

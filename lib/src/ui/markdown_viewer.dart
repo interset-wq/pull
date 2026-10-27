@@ -869,7 +869,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         PConfig(
           textStyle: theme.textTheme.bodyLarge!.copyWith(
             fontSize: fontSize,
-            height: 1.75,
+            height: AppPrefs.instance?.lineHeight ?? 1.75,
           ),
         ),
         ListConfig(
@@ -880,7 +880,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 style: TextStyle(
                   color: theme.colorScheme.primary,
                   fontSize: fontSize,
-                  height: 1.75,
+                  height: AppPrefs.instance?.lineHeight ?? 1.75,
                   fontWeight: FontWeight.w600,
                 ),
               );
@@ -1102,7 +1102,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: EdgeInsets.symmetric(
+              horizontal: AppPrefs.instance?.pageMargin ?? 16,
+            ),
             // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/桌面窗口下
             // 正文限宽居中，不拉满全屏；窄屏下 maxWidth 不起作用
             child: Center(

@@ -574,6 +574,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           : FutureBuilder<String>(
             future: _content,
             builder: (context, snapshot) {
+              // 加载失败（文件损坏/ipynb JSON 无效等）明确提示，
+              // 不能落到 !hasData 分支永远转圈
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      '加载失败：${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                );
+              }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }

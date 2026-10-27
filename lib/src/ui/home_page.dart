@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../git/repo_meta.dart';
 import '../git/sync_service.dart';
+import '../local/local_folder_service.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
@@ -28,6 +29,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _sync = GitSyncService();
   List<Directory>? _repos;
+  List<LocalFolder>? _localFolders;
   bool _cloning = false;
   bool _updatingAll = false;
 
@@ -42,7 +44,91 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadRepos();
+    _loadLocals();
     _silentPullAll();
+  }
+
+  Future<void> _loadLocals() async {
+    final folders = await LocalFolderService.listFolders();
+    if (!mounted) return;
+    setState(() => _localFolders = folders);
+  }
+
+  /// 添加本地文件夹（系统选择器授权 + 首次镜像）。
+  Future<void> _addLocalFolder() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final folder = await LocalFolderService.addFolder();
+      if (folder != null) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('已添加「${folder.name}」')),
+        );
+      }
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('添加失败: $e')));
+    }
+    await _loadLocals();
+  }
+
+  /// 打开本地文件夹：先重镜像拿到最新内容，再进仓库页（复用）。
+  Future<void> _openLocal(LocalFolder folder) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await LocalFolderService.syncFolder(folder);
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('刷新失败: $e')));
+      // 镜像失败仍打开旧内容
+    }
+    final dir = await LocalFolderService.mirrorDir(folder.name);
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => RepoPage(repoDir: dir),
+        settings: const RouteSettings(name: 'repo-root'),
+      ),
+    );
+  }
+
+  /// 仅重镜像（本地卡片上的刷新按钮）。
+  Future<void> _syncLocal(LocalFolder folder) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await LocalFolderService.syncFolder(folder);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('已刷新'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('刷新失败: $e')));
+    }
+  }
+
+  Future<void> _confirmRemoveLocal(LocalFolder folder) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('移除本地文件夹'),
+        content: Text(
+          '将移除「${folder.name}」的访问授权与镜像，原文件夹不受影响。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('移除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await LocalFolderService.removeFolder(folder);
+    await _loadLocals();
   }
 
   /// 启动时后台静默更新所有仓库：不转圈、不弹提示，完成后仅刷新列表。
@@ -85,7 +171,8 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final repos = _repos;
+    final repos = _repos ?? const <Directory>[];
+    final locals = _localFolders ?? const <LocalFolder>[];
     return Scaffold(
       appBar: AppBar(
         centerTitle: false,
@@ -175,15 +262,18 @@ class _HomePageState extends State<HomePage> {
               )
             : const Icon(Icons.add),
       ),
-      body: repos == null
+      body: _repos == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadRepos,
-              child: repos.isEmpty
-                  ? _EmptyState(onAdd: _showCloneDialog)
+              child: repos.isEmpty && locals.isEmpty
+                  ? _EmptyState(
+                      onAdd: _showCloneDialog,
+                      onAddLocal: _addLocalFolder,
+                    )
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                      itemCount: repos.length + 1,
+                      itemCount: locals.length + repos.length + 1,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
                         if (i == 0) {
@@ -205,10 +295,94 @@ class _HomePageState extends State<HomePage> {
                                 files: _collectRecents(repos),
                                 starred: false,
                               ),
+                              const SizedBox(height: 16),
+                              if (locals.isEmpty)
+                                // 空态：一张添加入口卡（避免孤立标题悬在仓库卡上方）
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: Card(
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      side: BorderSide(
+                                        color: theme.colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(16),
+                                      onTap: _addLocalFolder,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.create_new_folder_outlined,
+                                              color:
+                                                  theme.colorScheme.tertiary,
+                                              size: 32,
+                                            ),
+                                            const SizedBox(width: 16),
+                                            Expanded(
+                                              child: Text(
+                                                '添加本地文件夹',
+                                                style: theme
+                                                    .textTheme.titleMedium,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Markdown / Notebook',
+                                              style: theme
+                                                  .textTheme.bodySmall
+                                                  ?.copyWith(
+                                                color: theme.colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                            ),
+                                            const Icon(Icons.chevron_right),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else ...[
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '本地文件夹',
+                                        style: theme.textTheme.titleMedium,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: '添加本地文件夹',
+                                      icon: const Icon(
+                                        Icons.create_new_folder_outlined,
+                                      ),
+                                      onPressed: _addLocalFolder,
+                                    ),
+                                  ],
+                                ),
+                                for (final folder in locals)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _LocalCard(
+                                      name: folder.name,
+                                      onTap: () => _openLocal(folder),
+                                      onRefresh: () => _syncLocal(folder),
+                                      onRemove: () =>
+                                          _confirmRemoveLocal(folder),
+                                    ),
+                                  ),
+                              ],
                             ],
                           );
                         }
-                        final repo = repos[i - 1];
+                        if (i <= locals.length) {
+                          // 本地卡片已在上方汇总区渲染，跳过占位
+                          return const SizedBox.shrink();
+                        }
+                        final repo = repos[i - locals.length - 1];
                         final name =
                             repo.path.split(Platform.pathSeparator).last;
                         final meta = RepoMeta.read(repo.path);
@@ -619,9 +793,12 @@ class _HomePageState extends State<HomePage> {
 
 /// 空状态引导。
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onAdd});
+  const _EmptyState({required this.onAdd, this.onAddLocal});
 
   final VoidCallback onAdd;
+
+  /// 本地文件夹入口（可选：本地阅读器交付后出现）。
+  final VoidCallback? onAddLocal;
 
   @override
   Widget build(BuildContext context) {
@@ -644,6 +821,16 @@ class _EmptyState extends StatelessWidget {
             label: const Text('添加仓库'),
           ),
         ),
+        if (onAddLocal != null) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: onAddLocal,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('打开本地文件夹'),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -746,6 +933,67 @@ class _RepoCard extends StatelessWidget {
                 icon: const Icon(Icons.delete_outline),
                 color: theme.colorScheme.outline,
                 onPressed: onDelete,
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 本地文件夹卡片（Roadmap「本地文件阅读器」）：打开/刷新/移除。
+class _LocalCard extends StatelessWidget {
+  const _LocalCard({
+    required this.name,
+    required this.onTap,
+    required this.onRefresh,
+    required this.onRemove,
+  });
+
+  final String name;
+  final VoidCallback onTap;
+  final VoidCallback onRefresh;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.folder_open,
+                color: theme.colorScheme.tertiary,
+                size: 32,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(name,
+                    style: theme.textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis),
+              ),
+              IconButton(
+                tooltip: '刷新镜像',
+                icon: const Icon(Icons.sync),
+                onPressed: onRefresh,
+              ),
+              IconButton(
+                tooltip: '移除',
+                icon: const Icon(Icons.delete_outline),
+                color: theme.colorScheme.outline,
+                onPressed: onRemove,
               ),
               const Icon(Icons.chevron_right),
             ],
@@ -1193,6 +1441,38 @@ class _RepoPageState extends State<RepoPage> {
   }
 
   Future<void> _pull() async {
+    // 本地文件夹镜像：没有 git 远端，「同步」= 重新镜像授权文件夹的最新内容
+    if (LocalFolderService.isLocalMirror(widget.repoDir.path)) {
+      final folder = await LocalFolderService.matchMirror(
+        widget.repoDir.path,
+      );
+      if (folder == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('本地文件夹授权已移除')),
+          );
+        }
+        return;
+      }
+      try {
+        await LocalFolderService.syncFolder(folder);
+        _refresh();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已刷新'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        }
+      } on Object catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('刷新失败: $e')));
+        }
+      }
+      return;
+    }
     try {
       final result = await GitSyncService().pull(
         repoDir: widget.repoDir,

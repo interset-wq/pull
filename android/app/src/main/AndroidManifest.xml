@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Pull 拉读"
+        android:label="PullRead 拉读"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -31,7 +31,7 @@
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_book"
-            android:label="Pull 拉读"
+            android:label="PullRead 拉读"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -43,7 +43,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_page"
-            android:label="Pull 拉读"
+            android:label="PullRead 拉读"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -55,7 +55,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_arrow"
-            android:label="Pull 拉读"
+            android:label="PullRead 拉读"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -67,7 +67,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_converge"
-            android:label="Pull 拉读"
+            android:label="PullRead 拉读"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -79,7 +79,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_tray"
-            android:label="Pull 拉读"
+            android:label="PullRead 拉读"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

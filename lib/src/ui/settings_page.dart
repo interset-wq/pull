@@ -11,7 +11,7 @@ import '../theme/app_prefs.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
 
 /// 应用发布页（GitHub Releases，CI 自动构建发布），供手动下载最新 APK。
-const String kReleaseUrl = 'https://github.com/interset-wq/pull/releases';
+const String kReleaseUrl = 'https://github.com/interset-wq/pullread/releases';
 
 /// 应用图标选项（与 AppPrefs.kAppIconKeys / AndroidManifest alias 对应）。
 const Map<String, String> kAppIconLabels = {
@@ -451,7 +451,7 @@ class _AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<_AboutPage> {
   static const _channel = MethodChannel('app_icon');
-  static const _repoUrl = 'https://github.com/interset-wq/pull';
+  static const _repoUrl = 'https://github.com/interset-wq/pullread';
   static const _licenseUrl = '$_repoUrl/blob/main/LICENSE';
 
   Map<Object?, Object?>? _info;
@@ -508,7 +508,7 @@ class _AboutPageState extends State<_AboutPage> {
           const SizedBox(height: 16),
           Center(
             child: Text(
-              'Pull 拉读',
+              'PullRead 拉读',
               style: theme.textTheme.titleLarge
                   ?.copyWith(fontWeight: FontWeight.w600),
             ),
@@ -544,7 +544,7 @@ class _AboutPageState extends State<_AboutPage> {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.code_outlined),
             title: const Text('项目主页'),
-            subtitle: const Text('GitHub · interset-wq/pull'),
+            subtitle: const Text('GitHub · interset-wq/pullread'),
             trailing: const Icon(Icons.open_in_new, size: 18),
             onTap: () => _open(Uri.parse(_repoUrl)),
           ),

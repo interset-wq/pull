@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/icons/icon_book.png" width="128" alt="Pull 拉读 logo"/>
+<img src="assets/icons/icon_book.png" width="128" alt="PullRead logo"/>
 
-# Pull 拉读
+# PullRead
 
 **把笔记仓库装进口袋的原生阅读器**
 
@@ -10,7 +10,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-Android-4c8f56)](#-下载)
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Release](https://img.shields.io/badge/release-v1.6.0-f5b301)](https://github.com/interset-wq/pull/releases)
+[![Release](https://img.shields.io/badge/release-v1.6.0-f5b301)](https://github.com/interset-wq/pullread/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
@@ -64,13 +64,13 @@
 
 ## 📥 下载
 
-前往 [Releases](https://github.com/interset-wq/pull/releases) 下载最新 Android APK
+前往 [Releases](https://github.com/interset-wq/pullread/releases) 下载最新 Android APK
 （arm64-v8a，约 32MB，覆盖主流机型；tag 推送后由 GitHub Actions 自动构建发布）。
 
 ## 🚀 快速开始
 
 ```bash
-git clone https://github.com/interset-wq/pull.git
+git clone https://github.com/interset-wq/pullread.git
 cd reader
 flutter pub get
 flutter run                 # 运行（连接设备/模拟器）

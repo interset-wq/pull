@@ -31,9 +31,17 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 签名来源：本地直接用默认 debug keystore（~/.android/debug.keystore）；
+            // CI 通过环境变量注入仓库 Secret 里的同一把 keystore，保证两端
+            // 签名一致（AGP 对 debug keystore 的默认路径解析在 CI 上不可靠，
+            // 曾导致 runner 镜像自带的 keystore 混入）。
+            val storePath = System.getenv("KEYSTORE_PATH") ?: "${System.getProperty("user.home")}/.android/debug.keystore"
+            signingConfig = signingConfigs.create("release") {
+                storeFile = file(storePath)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 }

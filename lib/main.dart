@@ -61,7 +61,7 @@ class _ReaderAppState extends State<ReaderApp> {
         return ListenableBuilder(
           listenable: prefs,
           builder: (context, _) => MaterialApp(
-            title: 'Pull 拉读',
+            title: 'PullRead 拉读',
             theme: ThemeData(
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
               useMaterial3: true,

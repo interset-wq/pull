@@ -37,16 +37,31 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # release 以 debug keystore 签名（build.gradle.kts 模板默认）。CI 的
-      # debug keystore 是随机生成的，与本地不一致会导致升级安装被拒——
-      # 恢复仓库 Secret 里的本机 keystore，保证两端签名同源。
+      # release 签名 keystore（build.gradle.kts 读 KEYSTORE_PATH）。AGP 对
+      # debug keystore 的默认路径解析在 CI 上不可靠，曾混入 runner 镜像自带
+      # 的 keystore，导致 CI 产物无法升级安装本地构建的应用。
       - name: Restore signing keystore
         run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
       - name: Build arm64 release APK
         run: flutter build apk --split-per-abi --target-platform android-arm64
+
+      # 构建后断言 APK 签名证书 == keystore 证书，杜绝签名再次漂移
+      - name: Verify APK signature matches keystore
+        run: |
+          KS_SHA=$(keytool -list -v -keystore "$KEYSTORE_PATH" -storepass android \
+            -alias androiddebugkey | grep 'SHA256:' | head -1 | sed 's/.*SHA256: //; s/://g' | tr 'A-F' 'a-f')
+          APK_SHA=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | \
+            grep 'SHA-256 digest' | head -1 | sed 's/.*digest: //')
+          echo "keystore=$KS_SHA"
+          echo "apk    =$APK_SHA"
+          if [ -z "$APK_SHA" ] || [ "$KS_SHA" != "$APK_SHA" ]; then
+            echo "::error::APK 签名与 keystore 不一致——签名配置漂移，禁止发布"
+            exit 1
+          fi
 
       - name: Create release and upload APK
         uses: softprops/action-gh-release@v2

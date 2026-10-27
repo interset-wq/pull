@@ -54,6 +54,7 @@ dependencies:
   gal: ^2.3.3
   saf: ^2.1.2
   file_selector: ^1.1.0
+  fast_gbk: ^1.0.0
 
 dev_dependencies:
   flutter_test:

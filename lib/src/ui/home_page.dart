@@ -1407,7 +1407,7 @@ class _RepoPageState extends State<RepoPage> {
 
   void _openFile(NoteFile note) {
     RepoMeta.touchLastOpened(widget.repoDir.path, note.relativePath);
-    if (note.isMarkdown) {
+    if (note.isMarkdown || note.isPlainText) {
       Navigator.push(
         context,
         MaterialPageRoute<void>(

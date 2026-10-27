@@ -25,7 +25,9 @@
   **镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库同构，
   不为 SAF 单独抽象内容源）；桌面走 `file_selector` 直选目录。镜像标记
   `.pullread_local` 区分本地来源（「同步」= 重镜像）；只镜像 md/ipynb/代码/图片
-  （>32MB 跳过），重名文件夹自动加序号。
+  （>32MB 跳过），重名文件夹自动加序号。`.txt` 同样进镜像，打开时路由到
+  阅读页纯文本模式（`decodeTextBytes`：UTF-8 严格校验优先、GBK 回退，
+  纯 Dart，`lib/src/utils/text_encoding.dart`）。
 - **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）

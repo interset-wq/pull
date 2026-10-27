@@ -127,6 +127,9 @@ class NoteFile {
 
   bool get isMarkdown => NoteScanner.mdExtensions.contains(extension);
 
+  /// 纯文本（txt）：按纯文本阅读渲染，不走代码高亮。
+  bool get isPlainText => extension == '.txt';
+
   bool get isImage => NoteScanner.imageExtensions.contains(extension);
 }
 

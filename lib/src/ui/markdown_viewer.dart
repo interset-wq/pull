@@ -26,6 +26,7 @@ import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
 import '../notes/note_scanner.dart';
 import '../utils/markdown_plain_text.dart';
+import '../utils/text_encoding.dart';
 import '../notes/toc.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
@@ -387,7 +388,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   Future<String> _load() async {
-    var raw = await File(widget.note.absolutePath).readAsString();
+    // TXT 可能是 GBK/GB2312 编码，统一走字节解码（UTF-8 优先，GBK 兜底）
+    var raw =
+        decodeTextBytes(await File(widget.note.absolutePath).readAsBytes());
     _rawSource = raw;
     RepoMeta.touchLastOpened(widget.repoRoot, widget.note.relativePath);
     RepoMeta.pushRecent(
@@ -398,6 +401,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);
+    } else if (widget.note.isPlainText) {
+      // 纯文本（小说/文档）：逐行成段，复用 Markdown 渲染管线；
+      // 行首 # 等保留原样（章节标题恰好生成 TOC，可导航）
+      body = raw.replaceAll(RegExp(r'\r\n|\r'), '\n').split('\n').join('\n\n');
     } else {
       final fm = FrontMatter.parse(raw);
       _title = fm.title;
@@ -1682,7 +1689,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => note.isMarkdown
+        builder: (_) => note.isMarkdown || note.isPlainText
             ? MarkdownViewerPage(note: note, repoRoot: widget.repoRoot)
             : CodeViewerPage(path: path, fileName: note.fileName),
       ),

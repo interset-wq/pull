@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PullRead — 把笔记仓库装进口袋的原生阅读器</title>
+  <meta name="description" content="PullRead 是一款 Flutter 原生移动应用，将 GitHub / Gitee / GitCode 笔记仓库克隆到手机，零部署、零构建托管，仓库本身即数据源。支持 Markdown、Mermaid 图表、KaTeX 公式。">
+  <meta name="keywords" content="PullRead, Markdown 阅读器, Git 笔记, GitHub 阅读器, Flutter, Mermaid, KaTeX">
+  <meta property="og:title" content="PullRead — 把笔记仓库装进口袋的原生阅读器">
+  <meta property="og:description" content="GitHub / Gitee / GitCode 笔记仓库克隆到手机，零部署、零构建托管，仓库本身即数据源。">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="images/icons/icon_book.png">
+  <link rel="icon" href="images/icons/icon_book.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --color-bg: #0a0f0d;
+      --color-surface: #111916;
+      --color-surface-2: #182320;
+      --color-primary: #4c8f56;
+      --color-primary-light: #6ab876;
+      --color-accent: #f5b301;
+      --color-text: #e8ede9;
+      --color-text-secondary: #9ca8a0;
+      --color-border: #243029;
+      --radius: 12px;
+      --radius-lg: 20px;
+      --max-width: 1200px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.7;
+      font-size: 16px;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--color-primary-light); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--color-accent); }
+
+    .container { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
+
+    /* Navigation */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(10, 15, 13, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--color-border);
+      padding: 16px 0;
+    }
+
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+
+    .nav-brand img { width: 32px; height: 32px; }
+
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a { color: var(--color-text-secondary); font-size: 0.9rem; font-weight: 500; }
+    .nav-links a:hover { color: var(--color-text); }
+
+    .nav-cta {
+      background: var(--color-primary);
+      color: #fff !important;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .nav-cta:hover { background: var(--color-primary-light); transform: translateY(-1px); }
+
+    /* Hero */
+    .hero {
+      padding: 160px 0 100px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(76, 143, 86, 0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-icon {
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 28px;
+      border-radius: 24px;
+      background: var(--color-surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 32px rgba(76, 143, 86, 0.2);
+    }
+
+    .hero-icon img { width: 64px; height: 64px; }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 3.6rem);
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero h1 span { color: var(--color-primary-light); }
+
+    .hero-tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+      color: var(--color-text-secondary);
+      max-width: 600px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+
+    .hero-badges {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+    }
+
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .badge .dot.green { background: var(--color-primary); }
+    .badge .dot.yellow { background: var(--color-accent); }
+    .badge .dot.blue { background: #02569B; }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--color-primary);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(76, 143, 86, 0.3);
+    }
+    .btn-primary:hover {
+      background: var(--color-primary-light);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 28px rgba(76, 143, 86, 0.4);
+    }
+
+    .btn-secondary {
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+    .btn-secondary:hover {
+      background: var(--color-border);
+      color: var(--color-text);
+      transform: translateY(-2px);
+    }
+
+    .btn svg { width: 20px; height: 20px; }
+
+    /* Section common */
+    section { padding: 80px 0; }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--color-primary-light);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: clamp(1.8rem, 3.5vw, 2.4rem);
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.01em;
+    }
+
+    .section-desc {
+      font-size: 1.05rem;
+      color: var(--color-text-secondary);
+      max-width: 600px;
+      line-height: 1.7;
+    }
+
+    /* Features */
+    .features { background: var(--color-surface); }
+
+    .features-header { text-align: center; margin-bottom: 56px; }
+    .features-header .section-desc { margin: 0 auto; }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--color-primary);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: rgba(76, 143, 86, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .feature-card p {
+      color: var(--color-text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .feature-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 16px;
+    }
+
+    .feature-tag {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: rgba(76, 143, 86, 0.1);
+      color: var(--color-primary-light);
+      border: 1px solid rgba(76, 143, 86, 0.2);
+    }
+
+    /* Screenshots */
+    .screenshots-header { text-align: center; margin-bottom: 48px; }
+    .screenshots-header .section-desc { margin: 0 auto; }
+
+    .screenshots-scroll {
+      display: flex;
+      gap: 24px;
+      overflow-x: auto;
+      padding: 0 24px 24px;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .screenshots-scroll::-webkit-scrollbar { height: 6px; }
+    .screenshots-scroll::-webkit-scrollbar-track { background: var(--color-surface); border-radius: 3px; }
+    .screenshots-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+
+    .screenshot-item {
+      flex: 0 0 auto;
+      scroll-snap-align: center;
+      text-align: center;
+    }
+
+    .screenshot-item img {
+      width: 220px;
+      height: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--color-border);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      transition: transform 0.3s;
+    }
+
+    .screenshot-item:hover img { transform: scale(1.03); }
+
+    .screenshot-item p {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+    }
+
+    /* Tech Stack */
+    .tech { background: var(--color-surface); }
+
+    .tech-header { text-align: center; margin-bottom: 48px; }
+    .tech-header .section-desc { margin: 0 auto; }
+
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+
+    .tech-item {
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .tech-item-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: rgba(76, 143, 86, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 1.2rem;
+    }
+
+    .tech-item h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .tech-item p {
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Quick Start */
+    .quickstart-header { text-align: center; margin-bottom: 40px; }
+    .quickstart-header .section-desc { margin: 0 auto; }
+
+    .code-block {
+      max-width: 700px;
+      margin: 0 auto;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--color-surface-2);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .code-header span {
+      font-size: 0.8rem;
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+
+    .code-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .code-dots i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--color-border);
+    }
+
+    .code-dots i:nth-child(1) { background: #ff5f57; }
+    .code-dots i:nth-child(2) { background: #febc2e; }
+    .code-dots i:nth-child(3) { background: #28c840; }
+
+    .code-body {
+      padding: 24px;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      line-height: 1.8;
+      color: var(--color-text-secondary);
+      overflow-x: auto;
+    }
+
+    .code-body .cmd { color: var(--color-primary-light); }
+    .code-body .comment { color: #546e5a; }
+
+    /* Download CTA */
+    .download {
+      background: var(--color-surface);
+      text-align: center;
+    }
+
+    .download-box {
+      max-width: 600px;
+      margin: 0 auto;
+      background: linear-gradient(135deg, rgba(76, 143, 86, 0.15), rgba(76, 143, 86, 0.05));
+      border: 1px solid rgba(76, 143, 86, 0.3);
+      border-radius: var(--radius-lg);
+      padding: 56px 40px;
+    }
+
+    .download-box h2 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .download-box p {
+      color: var(--color-text-secondary);
+      margin-bottom: 28px;
+      font-size: 1rem;
+    }
+
+    .download-meta {
+      margin-top: 20px;
+      font-size: 0.8rem;
+      color: var(--color-text-secondary);
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--color-border);
+      text-align: center;
+    }
+
+    footer p {
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+    }
+
+    footer .footer-links {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    footer .footer-links a {
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+    }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .hero { padding: 120px 0 60px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .tech-grid { grid-template-columns: 1fr; }
+      .download-box { padding: 40px 24px; }
+      section { padding: 60px 0; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-brand">
+        <img src="images/icons/icon_book.png" alt="PullRead">
+        PullRead
+      </a>
+      <div class="nav-links">
+        <a href="#features">功能</a>
+        <a href="#screenshots">截图</a>
+        <a href="#tech">技术栈</a>
+        <a href="#quickstart">快速开始</a>
+        <a href="https://github.com/interset-wq/pullread/releases" class="nav-cta" target="_blank" rel="noopener">下载 APK</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="container">
+      <div class="hero-icon">
+        <img src="images/icons/icon_book.png" alt="PullRead">
+      </div>
+      <h1>把笔记仓库装进<span>口袋</span></h1>
+      <p class="hero-tagline">原生 Flutter 阅读器，将 GitHub / Gitee / GitCode 笔记仓库克隆到手机。零部署、零构建托管，仓库本身即数据源。</p>
+      <div class="hero-badges">
+        <span class="badge"><span class="dot green"></span>Android</span>
+        <span class="badge"><span class="dot blue"></span>Flutter 3.47+</span>
+        <span class="badge"><span class="dot yellow"></span>v1.6.0</span>
+        <span class="badge">MIT 开源</span>
+      </div>
+      <div class="hero-actions">
+        <a href="https://github.com/interset-wq/pullread/releases" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          下载 APK
+        </a>
+        <a href="https://github.com/interset-wq/pullread" class="btn btn-secondary" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="container">
+      <div class="features-header">
+        <span class="section-label">功能特性</span>
+        <h2 class="section-title">为笔记阅读而生的完整体验</h2>
+        <p class="section-desc">从 Markdown 渲染到仓库同步，每个细节都围绕「在手机上舒适阅读笔记仓库」设计。</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">📄</div>
+          <h3>Markdown / GFM 渲染</h3>
+          <p>完整支持 GFM 告警框、表格双档切换、折叠块、190+ 语言代码高亮，以及 Jupyter Notebook 直接转换渲染。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">GFM 告警</span>
+            <span class="feature-tag">表格</span>
+            <span class="feature-tag">折叠块</span>
+            <span class="feature-tag">代码高亮</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>Mermaid 图表</h3>
+          <p>28 种图类型原生渲染：流程图、时序图、类图、状态图、ER 图、甘特图、饼图、gitgraph、思维导图、桑基图等。超宽自动缩放，点按进全屏缩放查看。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">28 种图类型</span>
+            <span class="feature-tag">全屏缩放</span>
+            <span class="feature-tag">自动适配</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔢</div>
+          <h3>KaTeX 数学公式</h3>
+          <p>行内 <code>$...$</code> 与块级 <code>$$...$$</code> 公式渲染，智能识别金额场景（如 <code>$100</code>）避免误判。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">行内公式</span>
+            <span class="feature-tag">块级公式</span>
+            <span class="feature-tag">智能识别</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📡</div>
+          <h3>多平台仓库同步</h3>
+          <p>通过统一抽象层接入 GitHub / Gitee / GitCode，整仓克隆，启动时可选自动拉取同步。业务代码不绑定任何平台 API。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">GitHub</span>
+            <span class="feature-tag">Gitee</span>
+            <span class="feature-tag">GitCode</span>
+            <span class="feature-tag">libgit2</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧭</div>
+          <h3>深度阅读体验</h3>
+          <p>文章目录浮动按钮、面包屑导航、底部翻页条、阅读进度记忆、收藏与最近阅读、屏幕常亮，为长阅读场景优化。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">TOC 导航</span>
+            <span class="feature-tag">进度记忆</span>
+            <span class="feature-tag">收藏</span>
+            <span class="feature-tag">常亮</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🗂</div>
+          <h3>原始目录结构</h3>
+          <p>按仓库原目录结构浏览，支持子目录逐级进入、快速回到仓库根。非 Markdown 文件用语法高亮只读查看，代码行号同步滚动。</p>
+          <div class="feature-tags">
+            <span class="feature-tag">目录树</span>
+            <span class="feature-tag">逐级浏览</span>
+            <span class="feature-tag">代码查看</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <div class="container">
+      <div class="screenshots-header">
+        <span class="section-label">截图预览</span>
+        <h2 class="section-title">界面一览</h2>
+        <p class="section-desc">从仓库管理到沉浸式阅读，每个页面都为移动端优化。</p>
+      </div>
+    </div>
+    <div class="screenshots-scroll">
+      <div style="flex: 0 0 auto; width: 24px;"></div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/01_home.png" alt="首页" loading="lazy">
+        <p>首页：最近阅读与仓库管理</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/02_tree.png" alt="目录树" loading="lazy">
+        <p>目录树：按原结构浏览</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/03_reading.png" alt="阅读页" loading="lazy">
+        <p>阅读页：表格与 TOC</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/04_details.png" alt="折叠块" loading="lazy">
+        <p>折叠块：点击展开答案</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/06_mermaid_flowchart.png" alt="Mermaid 流程图" loading="lazy">
+        <p>Mermaid 流程图</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/07_mermaid_sequence.png" alt="Mermaid 时序图" loading="lazy">
+        <p>Mermaid 时序图</p>
+      </div>
+      <div class="screenshot-item">
+        <img src="images/screenshots/08_settings.png" alt="设置" loading="lazy">
+        <p>设置页</p>
+      </div>
+      <div style="flex: 0 0 auto; width: 24px;"></div>
+    </div>
+  </section>
+
+  <section class="tech" id="tech">
+    <div class="container">
+      <div class="tech-header">
+        <span class="section-label">技术栈</span>
+        <h2 class="section-title">构建于成熟开源生态</h2>
+        <p class="section-desc">基于 Flutter 原生框架，结合 libgit2 底层能力与专业渲染库。</p>
+      </div>
+      <div class="tech-grid">
+        <div class="tech-item">
+          <div class="tech-item-icon">🎯</div>
+          <div>
+            <h4>Flutter / Dart 3</h4>
+            <p>跨平台框架，目标 Android，Windows 桌面端用于本机预览调试</p>
+          </div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-item-icon">🔧</div>
+          <div>
+            <h4>libgit2 FFI</h4>
+            <p>通过 git2dart 实现克隆与 pull 只读能力，后台 isolate 执行避免卡 UI</p>
+          </div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-item-icon">📝</div>
+          <div>
+            <h4>markdown_widget</h4>
+            <p>Markdown 渲染引擎，配合 flutter_math_fork 实现 KaTeX 公式支持</p>
+          </div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-item-icon">📈</div>
+          <div>
+            <h4>mermaid_flutter</h4>
+            <p>Mermaid 图表原生渲染，支持 28 种图类型，超宽自动缩放</p>
+          </div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-item-icon">💾</div>
+          <div>
+            <h4>本地存储</h4>
+            <p>shared_preferences 管理偏好设置，JSON 元数据随仓库存储于 .meta/ 目录</p>
+          </div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-item-icon">🔌</div>
+          <div>
+            <h4>统一适配层</h4>
+            <p>RepositoryAdapter 抽象层，业务代码不绑定任何 Git 平台 API</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="container">
+      <div class="quickstart-header">
+        <span class="section-label">快速开始</span>
+        <h2 class="section-title">从源码构建</h2>
+        <p class="section-desc">克隆仓库，安装依赖，即可在设备或模拟器上运行。</p>
+      </div>
+      <div class="code-block">
+        <div class="code-header">
+          <div class="code-dots"><i></i><i></i><i></i></div>
+          <span>bash</span>
+        </div>
+        <div class="code-body">
+          <span class="cmd">git clone</span> https://github.com/interset-wq/pullread.git<br>
+          <span class="cmd">cd</span> reader<br>
+          <span class="cmd">flutter pub get</span><br>
+          <br>
+          <span class="comment"># 运行（连接设备/模拟器）</span><br>
+          <span class="cmd">flutter run</span><br>
+          <br>
+          <span class="comment"># 构建 release APK (arm64)</span><br>
+          <span class="cmd">flutter build apk</span> --split-per-abi --target-platform android-arm64
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="download">
+    <div class="container">
+      <div class="download-box">
+        <h2>立即下载 PullRead</h2>
+        <p>将你的笔记仓库装进口袋，随时随地舒适阅读。</p>
+        <a href="https://github.com/interset-wq/pullread/releases" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          前往 Releases 下载
+        </a>
+        <p class="download-meta">arm64-v8a &middot; 约 32MB &middot; 覆盖主流 Android 机型</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/interset-wq/pullread" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/interset-wq/pullread/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/interset-wq/pullread/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+      </div>
+      <p>PullRead &copy; 2024&ndash;2026 &middot; 把笔记仓库装进口袋的原生阅读器</p>
+    </div>
+  </footer>
+</body>
+</html>

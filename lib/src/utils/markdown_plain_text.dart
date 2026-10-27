@@ -7,6 +7,23 @@ import 'package:markdown/markdown.dart' as m;
 String markdownToPlainText(String source) =>
     _extractBlocks(source).join('\n\n');
 
+/// 提取正文第一个段落（Roadmap「导出与分享·分享卡片」）：只认 `<p>` 块，
+/// 代码块/标题/列表自动跳过；段内空白折叠为单空格。找不到返回空串。
+String firstParagraphOfMarkdown(String source) {
+  final doc = m.Document(
+    extensionSet: m.ExtensionSet.gitHubFlavored,
+    encodeHtml: false,
+  );
+  final lines = source.split(RegExp(r'(\r?\n)|(\r)'));
+  for (final node in doc.parseLines(lines)) {
+    if (node is m.Element && node.tag == 'p') {
+      final t = _inline(node).trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (t.isNotEmpty) return t;
+    }
+  }
+  return '';
+}
+
 List<String> _extractBlocks(String source) {
   final doc = m.Document(
     extensionSet: m.ExtensionSet.gitHubFlavored,

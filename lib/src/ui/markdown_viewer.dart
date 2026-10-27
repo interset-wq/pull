@@ -497,6 +497,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   _copyPlainText();
                 case 'exportImage':
                   _exportLongImage();
+                case 'shareCard':
+                  _exportShareCard();
               }
             },
             itemBuilder: (_) => [
@@ -513,9 +515,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 value: 'copyText',
                 child: Text('复制全文（纯文本）'),
               ),
-              // raw 模式下没有渲染内容，长图无从截取
-              if (!_showRaw)
-                const PopupMenuItem(value: 'exportImage', child: Text('导出长图')),
+              // raw 模式下没有渲染内容，长图/卡片无从生成
+              if (!_showRaw) ...[
+                const PopupMenuItem(
+                  value: 'exportImage',
+                  child: Text('导出长图'),
+                ),
+                const PopupMenuItem(value: 'shareCard', child: Text('分享卡片')),
+              ],
             ],
           ),
         ],
@@ -527,7 +534,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           if (_exportingImage) ...[
             const FloatingActionButton.small(
               heroTag: 'exporting',
-              tooltip: '正在生成长图',
+              tooltip: '正在生成图片',
               onPressed: null,
               child: SizedBox(
                 width: 20,
@@ -658,64 +665,21 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       if (image == null) {
         throw Exception('内容过长，已降到最低清晰度仍无法生成');
       }
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      ByteData? bytes;
+      try {
+        bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      } finally {
+        image.dispose();
+      }
       if (bytes == null) throw Exception('PNG 编码失败');
-      final png = bytes.buffer.asUint8List();
       // 尽快还原视图状态，再走保存/分享的慢 IO
       _forceExpand.value = false;
       await WidgetsBinding.instance.endOfFrame;
-      // 存入系统相册「PullRead」（gal 自动按 PNG 推导扩展名）；
-      // 保存失败（如拒绝权限）只提示，不阻断分享
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      var savedToGallery = false;
-      var galleryDenied = false;
-      try {
-        if (await Gal.hasAccess(toAlbum: true)) {
-          await Gal.putImageBytes(
-            png,
-            album: 'PullRead',
-            name: 'pullread-$stamp',
-          );
-          savedToGallery = true;
-        } else {
-          await Gal.requestAccess(toAlbum: true);
-          if (await Gal.hasAccess(toAlbum: true)) {
-            await Gal.putImageBytes(
-              png,
-              album: 'PullRead',
-              name: 'pullread-$stamp',
-            );
-            savedToGallery = true;
-          } else {
-            galleryDenied = true;
-          }
-        }
-      } on GalException {
-        galleryDenied = true;
-      }
-      if (savedToGallery) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('已保存到相册「PullRead」')),
-        );
-      } else if (galleryDenied) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('未获得相册权限，仅生成分享文件')),
-        );
-      }
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/pullread-$stamp.png');
-      await file.writeAsBytes(png, flush: true);
-      await SharePlus.instance.share(
-        ShareParams(files: [XFile(file.path)], text: _title),
+      await _savePngAndShare(
+        bytes.buffer.asUint8List(),
+        messenger,
+        name: 'pullread-${DateTime.now().millisecondsSinceEpoch}',
       );
-      // 分享面板拉起后临时文件即可清理（延迟留给慢加载的接收方）
-      Future<void>.delayed(const Duration(minutes: 5), () {
-        try {
-          if (file.existsSync()) file.deleteSync();
-        } on Object {
-          // 清理失败无碍
-        }
-      });
     } on Object catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
     } finally {
@@ -723,6 +687,209 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _forceExpand.value = false;
       if (mounted) setState(() => _exportingImage = false);
     }
+  }
+
+  /// PNG 产物落地共用尾段（长图/分享卡片共用）：存入系统相册「PullRead」
+  /// （gal 自动按 PNG 推导扩展名；保存失败如拒绝权限只提示，不阻断分享），
+  /// 再写临时文件调起系统分享，分享面板拉起后延迟清理临时文件。
+  Future<void> _savePngAndShare(
+    Uint8List png,
+    ScaffoldMessengerState messenger, {
+    required String name,
+  }) async {
+    var savedToGallery = false;
+    var galleryDenied = false;
+    try {
+      if (!await Gal.hasAccess(toAlbum: true)) {
+        await Gal.requestAccess(toAlbum: true);
+      }
+      if (await Gal.hasAccess(toAlbum: true)) {
+        await Gal.putImageBytes(png, album: 'PullRead', name: name);
+        savedToGallery = true;
+      } else {
+        galleryDenied = true;
+      }
+    } on GalException {
+      galleryDenied = true;
+    }
+    if (savedToGallery) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('已保存到相册「PullRead」')),
+      );
+    } else if (galleryDenied) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('未获得相册权限，仅生成分享文件')),
+      );
+    }
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$name.png');
+    await file.writeAsBytes(png, flush: true);
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(file.path)], text: _title),
+    );
+    // 分享面板拉起后临时文件即可清理（延迟留给慢加载的接收方）
+    Future<void>.delayed(const Duration(minutes: 5), () {
+      try {
+        if (file.existsSync()) file.deleteSync();
+      } on Object {
+        // 清理失败无碍
+      }
+    });
+  }
+
+  /// 分享卡片（Roadmap「导出与分享·分享卡片」）：标题 + 首段摘要 + 来源仓库
+  /// 的 4:5 竖版卡片图。不走 RepaintBoundary 截屏，Canvas + TextPainter 离屏
+  /// 绘制：固定尺寸无纹理上限问题，也不受折叠区/滚动状态影响。
+  /// 配色跟随亮暗主题（表面色 + 松绿品牌点缀），与长图共用存相册+分享尾段。
+  Future<void> _exportShareCard() async {
+    if (_exportingImage) return;
+    setState(() => _exportingImage = true);
+    final messenger = ScaffoldMessenger.of(context);
+    // dpr 在首个 await 前采集：避免跨 async gap 使用 context
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final theme = Theme.of(context);
+    final raw = _rawSource;
+    try {
+      if (raw == null || raw.isEmpty) {
+        throw Exception('内容尚未加载完成');
+      }
+      final png = await _renderShareCard(
+        title: _title ?? widget.note.fileName,
+        summary: firstParagraphOfMarkdown(raw),
+        source: RepoMeta.read(widget.repoRoot)?.source ??
+            widget.repoRoot.split(Platform.pathSeparator).last,
+        date: _cardDate(DateTime.now()),
+        scheme: theme.colorScheme,
+        textTheme: theme.textTheme,
+        dpr: dpr,
+      );
+      await _savePngAndShare(
+        png,
+        messenger,
+        name: 'pullread-card-${DateTime.now().millisecondsSinceEpoch}',
+      );
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('卡片生成失败：$e')));
+    } finally {
+      if (mounted) setState(() => _exportingImage = false);
+    }
+  }
+
+  /// 卡片日期行：2026-10-27 形式，来源行用
+  static String _cardDate(DateTime t) =>
+      '${t.year}-${t.month.toString().padLeft(2, '0')}-'
+      '${t.day.toString().padLeft(2, '0')}';
+
+  /// 离屏绘制分享卡片。860×1075 逻辑像素（4:5），按 dpr 放大保证清晰度。
+  /// 纯 Canvas/TextPainter 同步布局，卡片尺寸小、开销可忽略。
+  static Future<Uint8List> _renderShareCard({
+    required String title,
+    required String summary,
+    required String source,
+    required String date,
+    required ColorScheme scheme,
+    required TextTheme textTheme,
+    required double dpr,
+  }) async {
+    const w = 860.0;
+    const h = 1075.0;
+    const pad = 72.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.scale(dpr);
+
+    // 配色跟随亮暗主题：表面底色 + onSurface 标题 + onSurfaceVariant 摘要，
+    // 品牌点缀用 primary（Colors.teal 种子色派生的松绿）
+    final fg = scheme.onSurface;
+    final sub = scheme.onSurfaceVariant;
+    final brand = scheme.primary;
+    canvas.drawRect(
+      Offset.zero & const Size(w, h),
+      ui.Paint()..color = scheme.surface,
+    );
+
+    // 只布局不绘制：由调用处决定落笔位置
+    TextPainter layout(
+      String text, {
+      required double fontSize,
+      required Color color,
+      FontWeight weight = FontWeight.w400,
+      double height = 1.4,
+      int maxLines = 1,
+    }) {
+      return TextPainter(
+        text: TextSpan(
+          text: text,
+          style: textTheme.bodyMedium!.copyWith(
+            fontSize: fontSize,
+            color: color,
+            fontWeight: weight,
+            height: height,
+          ),
+        ),
+        maxLines: maxLines,
+        ellipsis: '…',
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: w - pad * 2);
+    }
+
+    // 顶部品牌字
+    final brandTp = layout(
+      'PullRead 拉读',
+      fontSize: 28,
+      color: brand,
+      weight: FontWeight.w600,
+    );
+    brandTp.paint(canvas, Offset(pad, pad));
+
+    // 品牌条 + 标题
+    var y = pad + brandTp.height + 64;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(pad, y, 56, 10),
+        const Radius.circular(5),
+      ),
+      ui.Paint()..color = brand,
+    );
+    y += 38;
+    final titleTp = layout(
+      title,
+      fontSize: 56,
+      color: fg,
+      weight: FontWeight.w700,
+      height: 1.3,
+      maxLines: 4,
+    );
+    titleTp.paint(canvas, Offset(pad, y));
+    y += titleTp.height + 36;
+
+    // 首段摘要（可缺：纯代码/列表文档没有 <p> 段落）
+    if (summary.isNotEmpty) {
+      final summaryTp = layout(
+        summary,
+        fontSize: 32,
+        color: sub,
+        height: 1.6,
+        maxLines: 5,
+      );
+      summaryTp.paint(canvas, Offset(pad, y));
+    }
+
+    // 底部：细分隔线 + 来源行（锚定到底边）
+    final lineY = h - pad - 76;
+    canvas.drawRect(
+      Rect.fromLTWH(pad, lineY, w - pad * 2, 1),
+      ui.Paint()..color = scheme.outlineVariant,
+    );
+    final sourceTp = layout('$source · $date', fontSize: 26, color: sub);
+    sourceTp.paint(canvas, Offset(pad, lineY + 32));
+
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync((w * dpr).round(), (h * dpr).round());
+    picture.dispose();
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    return bytes!.buffer.asUint8List();
   }
 
   /// 手势翻页（Roadmap「阅读操作手感」）：正文区域左右快速滑动切换

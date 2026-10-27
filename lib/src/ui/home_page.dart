@@ -780,6 +780,9 @@ class _RepoPageState extends State<RepoPage> {
   List<NoteFile>? _allNotes;
   String _query = '';
 
+  // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
+  final Set<String> _expandedDirs = <String>{};
+
   Directory get _currentDir => Directory(
       '${widget.repoDir.path}${Platform.pathSeparator}'
       '${widget.subPath.replaceAll('/', Platform.pathSeparator)}'
@@ -795,30 +798,55 @@ class _RepoPageState extends State<RepoPage> {
     setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
   }
 
-  /// 当前目录下的子文件夹（应用 ignore 规则），排序后返回名称。
-  List<String> _subDirs() {
-    if (!mounted) return const [];
-    final dir = _currentDir;
-    if (!dir.existsSync()) return const [];
-    return dir
-        .listSync(followLinks: false)
-        .whereType<Directory>()
-        .map((d) => d.path.split(Platform.pathSeparator).last)
-        .where((name) => !_scanner.isIgnored(name))
-        .toList()
-      ..sort(compareNatural);
-  }
+  /// 构建目录树条目：目录行就地展开/折叠（_expandedDirs 控制），
+  /// 文件行点击打开。展开的目录递归展开下一层（缩进按层级递增）。
+  List<_TreeEntry> _treeEntries() {
+    final entries = <_TreeEntry>[];
+    final allNotes = _allNotes ?? const <NoteFile>[];
 
-  /// 当前目录下的 Markdown 笔记。
-  List<NoteFile> _localNotes() {
-    final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
-    return (_allNotes ?? const <NoteFile>[])
-        .where((n) => n.relativePath.startsWith(prefix))
-        .where((n) => !n.relativePath
-            .substring(prefix.length)
-            .contains('/'))
-        .toList()
-      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+    void walk(String dirRel, int depth) {
+      final dir = dirRel.isEmpty
+          ? _currentDir
+          : Directory(
+              '${widget.repoDir.path}${Platform.pathSeparator}'
+              '${dirRel.replaceAll('/', Platform.pathSeparator)}',
+            );
+      if (!dir.existsSync()) return;
+      final prefix = dirRel.isEmpty ? '' : '$dirRel/';
+      // 子目录（应用 ignore 规则），自然排序
+      final dirs = dir
+          .listSync(followLinks: false)
+          .whereType<Directory>()
+          .map((d) => d.path.split(Platform.pathSeparator).last)
+          .where((name) => !_scanner.isIgnored(name))
+          .toList()
+        ..sort(compareNatural);
+      // 当前层的文件（来自全仓库扫描结果，按前缀取本层）
+      final files = allNotes
+          .where((n) => n.relativePath.startsWith(prefix))
+          .where((n) => !n.relativePath.substring(prefix.length).contains('/'))
+          .toList()
+        ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+
+      for (final name in dirs) {
+        final rel = '$prefix$name';
+        entries.add(_TreeEntry.dir(rel, name, depth));
+        if (_expandedDirs.contains(rel)) {
+          final before = entries.length;
+          walk(rel, depth + 1);
+          // 目录展开后没有任何可见内容时给出占位，避免"点了没反应"
+          if (entries.length == before) {
+            entries.add(_TreeEntry.placeholder(depth + 1));
+          }
+        }
+      }
+      for (final note in files) {
+        entries.add(_TreeEntry.file(note, depth));
+      }
+    }
+
+    walk(widget.subPath, 0);
+    return entries;
   }
 
   @override
@@ -830,9 +858,9 @@ class _RepoPageState extends State<RepoPage> {
         ? repoName
         : widget.subPath.split('/').last;
 
-    final notes = searching ? _searchAll() : _localNotes();
-    final dirs = searching ? const <String>[] : _subDirs();
-    final isEmpty = dirs.isEmpty && notes.isEmpty;
+    final entries = searching ? null : _treeEntries();
+    final notes = searching ? _searchAll() : const <NoteFile>[];
+    final isEmpty = searching ? notes.isEmpty : entries!.isEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -884,76 +912,134 @@ class _RepoPageState extends State<RepoPage> {
                       SizedBox(height: 120),
                       Center(child: Text('这里没有文件')),
                     ])
-                  : ListView(
-                      padding: const EdgeInsets.only(bottom: 32),
-                      children: [
-                        // 子文件夹（保持原目录结构），尾部显示文件数
-                        for (final name in dirs)
-                          ListTile(
-                            dense: true,
-                            minVerticalPadding: 4,
-                            leading: Icon(
-                              Icons.folder_outlined,
-                              color: theme.colorScheme.primary,
-                              size: 22,
-                            ),
-                            title: Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => RepoPage(
-                                  repoDir: widget.repoDir,
-                                  subPath: widget.subPath.isEmpty
-                                      ? name
-                                      : '${widget.subPath}/$name',
+                  : searching
+                      // 搜索模式：扁平结果列表，显示相对路径
+                      ? ListView(
+                          padding: const EdgeInsets.only(bottom: 32),
+                          children: [
+                            for (final note in notes)
+                              ListTile(
+                                dense: true,
+                                minVerticalPadding: 4,
+                                leading: Icon(
+                                  note.isMarkdown
+                                      ? Icons.description_outlined
+                                      : note.isImage
+                                          ? Icons.image_outlined
+                                          : Icons.code_outlined,
+                                  color: note.isMarkdown
+                                      ? theme.colorScheme.onSurfaceVariant
+                                      : note.isImage
+                                          ? theme.colorScheme.tertiary
+                                          : theme.colorScheme.secondary,
+                                  size: 22,
                                 ),
+                                title: Text(
+                                  '${note.fileName}${note.extension}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                                subtitle: Text(
+                                  note.relativePath,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                onTap: () => _openFile(note),
                               ),
-                            ),
-                          ),
-                        // 当前目录下的笔记与代码文件（单行紧凑）
-                        for (final note in notes)
-                          ListTile(
-                            dense: true,
-                            minVerticalPadding: 4,
-                            leading: Icon(
-                              note.isMarkdown
-                                  ? Icons.description_outlined
-                                  : note.isImage
-                                      ? Icons.image_outlined
-                                      : Icons.code_outlined,
-                              color: note.isMarkdown
-                                  ? theme.colorScheme.onSurfaceVariant
-                                  : note.isImage
-                                      ? theme.colorScheme.tertiary
-                                      : theme.colorScheme.secondary,
-                              size: 22,
-                            ),
-                            title: Text(
-                              '${note.fileName}${note.extension}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                            subtitle: searching
-                                ? Text(
-                                    note.relativePath,
+                          ],
+                        )
+                      // 目录模式：就地展开/折叠的目录树
+                      : ListView(
+                          padding: const EdgeInsets.only(bottom: 32),
+                          children: [
+                            for (final entry in entries!)
+                              if (entry.isDir)
+                                ListTile(
+                                  dense: true,
+                                  minVerticalPadding: 4,
+                                  contentPadding: EdgeInsets.only(
+                                    left: 16 + entry.depth * 20.0,
+                                    right: 16,
+                                  ),
+                                  leading: Icon(
+                                    _expandedDirs.contains(entry.dirRel)
+                                        ? Icons.folder_open_outlined
+                                        : Icons.folder_outlined,
+                                    color: theme.colorScheme.primary,
+                                    size: 22,
+                                  ),
+                                  title: Text(
+                                    entry.name!,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme
-                                          .onSurfaceVariant,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  trailing: Icon(
+                                    _expandedDirs.contains(entry.dirRel)
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                    size: 18,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                  onTap: () => setState(() {
+                                    if (!_expandedDirs
+                                        .remove(entry.dirRel!)) {
+                                      _expandedDirs.add(entry.dirRel!);
+                                    }
+                                  }),
+                                )
+                              else if (entry.isEmptyPlaceholder)
+                                Padding(
+                                  padding: EdgeInsets.only(
+                                    left: 16 + entry.depth * 20.0 + 46,
+                                    top: 6,
+                                    bottom: 6,
+                                  ),
+                                  child: Text(
+                                    '空目录',
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
                                     ),
-                                  )
-                                : null,
-                            onTap: () => _openFile(note),
-                          ),
-                      ],
-                    ),
+                                  ),
+                                )
+                              else
+                                ListTile(
+                                  dense: true,
+                                  minVerticalPadding: 4,
+                                  contentPadding: EdgeInsets.only(
+                                    left: 16 + entry.depth * 20.0 + 22,
+                                    right: 16,
+                                  ),
+                                  leading: Icon(
+                                    entry.note!.isMarkdown
+                                        ? Icons.description_outlined
+                                        : entry.note!.isImage
+                                            ? Icons.image_outlined
+                                            : Icons.code_outlined,
+                                    color: entry.note!.isMarkdown
+                                        ? theme
+                                            .colorScheme.onSurfaceVariant
+                                        : entry.note!.isImage
+                                            ? theme.colorScheme.tertiary
+                                            : theme.colorScheme.secondary,
+                                    size: 22,
+                                  ),
+                                  title: Text(
+                                    '${entry.note!.fileName}${entry.note!.extension}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  onTap: () => _openFile(entry.note!),
+                                ),
+                          ],
+                        ),
             ),
           ),
         ],
@@ -1026,4 +1112,35 @@ class _RepoPageState extends State<RepoPage> {
       }
     }
   }
+}
+
+/// 目录树条目：目录行（可折叠）、文件行或空目录占位。
+class _TreeEntry {
+  const _TreeEntry._({
+    required this.depth,
+    this.dirRel,
+    this.name,
+    this.note,
+    this.isEmptyPlaceholder = false,
+  });
+
+  /// 目录行：[dirRel] 为相对仓库根的路径，点击切换展开/折叠。
+  factory _TreeEntry.dir(String dirRel, String name, int depth) =>
+      _TreeEntry._(dirRel: dirRel, name: name, depth: depth);
+
+  /// 文件行：直接打开 [note]。
+  factory _TreeEntry.file(NoteFile note, int depth) =>
+      _TreeEntry._(note: note, depth: depth);
+
+  /// 空目录占位（展开后无可见内容时避免"点了没反应"）。
+  factory _TreeEntry.placeholder(int depth) =>
+      const _TreeEntry._(depth: 0, isEmptyPlaceholder: true);
+
+  final int depth;
+  final String? dirRel;
+  final String? name;
+  final NoteFile? note;
+  final bool isEmptyPlaceholder;
+
+  bool get isDir => dirRel != null;
 }

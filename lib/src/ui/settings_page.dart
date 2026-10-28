@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../git/repo_meta.dart';
+import '../local/local_folder_service.dart';
+import '../local/mirror_state.dart';
 import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
@@ -337,6 +339,7 @@ class SettingsPage extends StatelessWidget {
               },
             ),
           ),
+          const _PendingEditsTile(),
           AnimatedBuilder(
             animation: prefs,
             builder: (context, _) => SwitchListTile(
@@ -620,6 +623,176 @@ class _AboutPageState extends State<_AboutPage> {
           const SizedBox(height: 24),
         ],
       ),
+    );
+  }
+}
+
+/// 「未写回的修改」入口：编辑器保存时原文件夹写回失败的文件会记在
+/// 镜像的待写回清单里，这里展示数量、明细并可重试。
+class _PendingEditsTile extends StatefulWidget {
+  const _PendingEditsTile();
+
+  @override
+  State<_PendingEditsTile> createState() => _PendingEditsTileState();
+}
+
+class _PendingEditsTileState extends State<_PendingEditsTile> {
+  int? _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final items = await LocalFolderService.allPending();
+    if (!mounted) return;
+    setState(() => _count = items.length);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final count = _count;
+    final alert = count != null && count > 0;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        alert ? Icons.error_outline : Icons.cloud_done_outlined,
+        color: alert ? theme.colorScheme.error : null,
+      ),
+      title: const Text('未写回的修改'),
+      subtitle: Text(
+        switch (count) {
+          null => '检查中…',
+          0 => '没有待写回的修改',
+          _ => '$count 个文件待写回原文件夹（镜像已保存，原文件夹未更新）',
+        },
+      ),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      onTap: _open,
+    );
+  }
+
+  Future<void> _open() async {
+    final items = await LocalFolderService.allPending();
+    if (!mounted) return;
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('没有待写回的修改')));
+      await _refresh();
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _PendingDialog(items: items),
+    );
+    await _refresh();
+  }
+}
+
+/// 待写回明细：逐条列出，可整体重试，或显式用镜像覆盖源文件。
+class _PendingDialog extends StatefulWidget {
+  const _PendingDialog({required this.items});
+
+  final List<(LocalFolder, PendingEdit)> items;
+
+  @override
+  State<_PendingDialog> createState() => _PendingDialogState();
+}
+
+class _PendingDialogState extends State<_PendingDialog> {
+  late List<(LocalFolder, PendingEdit)> _items = widget.items;
+  bool _busy = false;
+
+  Future<void> _retry({required bool force}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    var ok = 0;
+    var failed = 0;
+    final folders = <String, LocalFolder>{
+      for (final item in _items) item.$1.name: item.$1,
+    };
+    for (final folder in folders.values) {
+      final result = await LocalFolderService.retryPending(folder, force: force);
+      ok += result.$1;
+      failed += result.$2;
+    }
+    final remaining = await LocalFolderService.allPending();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _items = remaining;
+    });
+    final message = switch ((ok, failed)) {
+      (0, 0) => '没有可写回的文件',
+      (_, 0) => '已写回 $ok 个文件',
+      (0, _) => '写回失败（$failed 个）',
+      _ => '写回成功 $ok 个，失败 $failed 个',
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('未写回的修改'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _items.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('全部已写回'),
+              )
+            : ListView.separated(
+                shrinkWrap: true,
+                itemCount: _items.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final (folder, edit) = _items[index];
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      edit.relativePath,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      edit.conflict
+                          ? '${folder.name} · 源文件已改动，直接写回会覆盖它'
+                          : folder.name,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: edit.conflict
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+        TextButton(
+          onPressed: _busy || _items.isEmpty
+              ? null
+              : () => _retry(force: false),
+          child: const Text('重试写回'),
+        ),
+        FilledButton(
+          onPressed: _busy || _items.isEmpty
+              ? null
+              : () => _retry(force: true),
+          child: const Text('以镜像为准覆盖'),
+        ),
+      ],
     );
   }
 }

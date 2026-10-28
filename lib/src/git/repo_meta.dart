@@ -5,14 +5,27 @@ import 'dart:io';
 /// 存于 `<reposRoot>/.meta/<仓库名>.json` —— 刻意放在克隆仓库之外，
 /// 不污染只读仓库内容，pull 也不会触碰它。
 class RepoMeta {
-  const RepoMeta({this.url, this.branch, this.lastOpened});
+  const RepoMeta({
+    this.url,
+    this.branch,
+    this.lastOpened,
+    this.syncedAt,
+  });
 
   final String? url;
   final String? branch;
   final String? lastOpened;
 
+  /// 最近一次成功同步（克隆或 pull）的时间；用于仓库卡展示。
+  final DateTime? syncedAt;
+
   /// 一条最近阅读记录（全局）。
-  const RepoMeta.recent({required this.lastOpened, this.url, this.branch});
+  const RepoMeta.recent({
+    required this.lastOpened,
+    this.url,
+    this.branch,
+    this.syncedAt,
+  });
 
   /// 进度/收藏/历史条目数量上限，防止 meta 文件无限膨胀。
   static const _maxEntries = 50;
@@ -69,6 +82,7 @@ class RepoMeta {
       url: raw['url'] as String?,
       branch: raw['branch'] as String?,
       lastOpened: raw['lastOpened'] as String?,
+      syncedAt: DateTime.tryParse((raw['syncedAt'] as String?) ?? ''),
     );
   }
 
@@ -100,6 +114,13 @@ class RepoMeta {
   static void touchLastOpened(String repoRoot, String relativePath) {
     final raw = _readRaw(repoRoot);
     raw['lastOpened'] = relativePath;
+    _write(repoRoot, raw);
+  }
+
+  /// 记录一次成功同步（pull 之后调用，克隆时已由 writeClone 写入）。
+  static void touchSynced(String repoRoot) {
+    final raw = _readRaw(repoRoot);
+    raw['syncedAt'] = DateTime.now().toIso8601String();
     _write(repoRoot, raw);
   }
 

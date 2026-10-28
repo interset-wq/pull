@@ -17,23 +17,57 @@
   通道缺失的平台上 `setAppIcon` 仅持久化偏好、静默忽略。
 - **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证。
   - **Android 硬约束**：git2dart 静态链接的 OpenSSL 无法访问系统证书库，`main()` 必须在 `runApp` 前依次执行 `WidgetsFlutterBinding.ensureInitialized()` → `Libgit2.version`（初始化 libgit2）→ `AndroidSSLHelper.initialize()` → `Libgit2.setSSLCertLocations(file:)`，否则 HTTPS 克隆报 "the SSL certificate is invalid"（CA 证书包随 git2dart_binaries 打包，无需自备）。
-  - **isolate 硬约束**：git 操作在 `Isolate.run` 后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。
+  - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。pull 用 `Isolate.run`；**clone 用 `Isolate.spawn` + `ReceivePort`**，超时 5 分钟时 `Isolate.kill` 并清理目标目录——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。
   - **构建陷阱**：`INTERNET` 权限必须声明在 `android/app/src/main/AndroidManifest.xml`——Flutter 模板默认只加在 debug/profile 变体，release 包无网络权限，所有 HTTPS 请求报 `GIT_ERROR_NET: No address associated with hostname`。
 - **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
+  - **远程图片缓存**（`lib/src/ui/image_cache.dart`）：网络图先读磁盘缓存，命中立即出图（离线可读，不再等 30s 超时）；URL 经双 32 位哈希落盘到 `<docs>/imgcache`，总量 >200MB 按写入时间淘汰；超过 7 天的缓存在后台静默刷新一次，下载失败回退缓存副本。
 - **本地文件夹阅读**（`lib/src/local/local_folder_service.dart`）：Android 走
-  `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→ 全量
-  **镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库同构，
-  不为 SAF 单独抽象内容源）；桌面走 `file_selector` 直选目录。镜像标记
-  `.pullread_local` 区分本地来源（「同步」= 重镜像）；只镜像 md/ipynb/代码/图片
-  （>32MB 跳过），重名文件夹自动加序号。`.txt` 同样进镜像，打开时路由到
+  `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→
+  **增量镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库
+  同构，不为 SAF 单独抽象内容源）；桌面走 `file_selector` 直选目录。镜像标记
+  `.pullread_local` 区分本地来源（「同步」= 增量重镜像）；只镜像
+  md/ipynb/代码/图片（>32MB 跳过），重名文件夹自动加序号。增量依据镜像根下
+  `.pullread_manifest.json` 的源侧 `(size, mtime)` 快照；SAF 授权必须申请
+  **写**权限（`pickDirectory(writePermission: true)`），否则编辑器无法写回。
+  `.txt` 同样进镜像，打开时路由到
   阅读页纯文本模式（`decodeTextBytes`：UTF-8 严格校验优先、GBK 回退，
   纯 Dart，`lib/src/utils/text_encoding.dart`）。
 - **本地 Markdown 编辑器**（`lib/src/ui/markdown_editor.dart`）：本地镜像 md
   的阅读页菜单「编辑」进入——源码 + 预览切换、手动保存 + 未保存离开提醒；
   保存双写镜像（dart:io）+ 原文件夹（Android SAF `writeFileBytes(overwrite:)`
   按相对路径逐段 `child()` 解析，桌面直写真实路径），保存返回阅读页自动
-  重载；仓库内文件只读，仍不做 git 提交。
+  重载；仓库内文件只读，仍不做 git 提交。写回失败时记入镜像根下
+  `.pullread_pending.json`（`.pullread_manifest.json` 旁）：之后的增量
+  同步会**跳过**这些文件并自动重试写回，绝不拿源侧旧内容覆盖镜像——
+  设置页「数据 → 未写回的修改」可查看明细、重试或以镜像为准强制覆盖。
 - **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
+- **目录扫描与缓存**（`lib/src/notes/note_index.dart`）：仓库文件列表在后台
+  isolate 扫描（UI 线程不做递归 `listSync`，大仓库不卡首帧），结果缓存到
+  `<reposRoot>/.meta/index/<仓库名>.json`；进入仓库页先用缓存渲染、再后台
+  重扫校正（stale-while-revalidate）。删除仓库/本地文件夹时一并清理该缓存。
+- **正文检索**（`lib/src/search/`）：仓库页搜索框可切换「文件名 / 正文」；
+  首页搜索图标进入 `lib/src/ui/global_search_page.dart` 跨仓库检索（逐仓库
+  顺序执行、结果流式分组）。正文检索在 isolate 内读 md/ipynb/txt（单文件
+  ≤2MB）做线性匹配，返回命中次数 + 上下文摘要（带命中偏移供
+  `SearchSnippetText` 高亮）。**刻意不建倒排索引**：中文 2-gram 的 postings
+  条目数与正文字符数同量级，序列化后往往比正文本身还大，而笔记仓库正文只有
+  几 MB，页缓存 + `indexOf` 足够快且无索引过期问题。
+- **文内查找**（`lib/src/ui/markdown_viewer.dart` + `findTextMatches`）：阅读页
+  AppBar 搜索图标打开查找条（raw 模式不提供）；命中按行返回，行号与
+  `extractToc` 的 `TocEntry.line` 同一坐标系（都基于 front-matter/ipynb
+  转换后的正文），跳转时定位到命中所属章节标题，无标题文档按字符比例滚动。
+- **标签聚合**（`lib/src/notes/tag_index.dart` + `lib/src/ui/tag_page.dart`）：
+  首页标签图标进入标签页，聚合所有仓库与本地文件夹镜像的 front-matter
+  `tags`（只读每个文件头 8KB，isolate 内扫描），点标签按 AND 跨仓库筛选；
+  多个标签同时选中即要求全部命中。
+- **断链检查**（`lib/src/notes/link_check.dart`）：仓库页「更多 → 检查断链」
+  批量校验相对链接/图片是否仍存在（跳过外部 URL/锚点/代码块，还原百分号
+  编码与 `../`），结果按来源文件分组、可复制清单；纯只读，不修改仓库。
+- **同步可感知**：`GitSyncService.checkRemote()` 在 isolate 内 fetch 后用
+  `RevWalk(push 远端头, hide 本地头)` 统计落后提交数（不移动本地分支）；
+  仓库页「更多 → 检查更新」先展示数量再由用户决定是否 pull。`RepoMeta`
+  的 `syncedAt` 在克隆（`writeClone`）与成功 pull（`touchSynced`）时更新，
+  仓库卡展示「同步于 …」。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

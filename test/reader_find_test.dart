@@ -1,0 +1,74 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:reader/src/notes/note_scanner.dart';
+import 'package:reader/src/ui/markdown_viewer.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// 文内查找：打开查找条 → 输入 → 命中计数 → 上一处/下一处循环。
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets('find bar counts matches and cycles through them', (tester) async {
+    final repo = Directory.systemTemp.createTempSync('reader-find-repo');
+    addTearDown(() {
+      if (repo.existsSync()) repo.deleteSync(recursive: true);
+    });
+    final file = File('${repo.path}${Platform.pathSeparator}note.md')
+      ..writeAsStringSync(
+        '# 第一章\n\n关键词 在这里\n\n## 第二章\n\n再来一个关键词\n',
+      );
+    final note = NoteFile(
+      relativePath: 'note.md',
+      absolutePath: file.path,
+      modified: file.statSync().modified,
+      sizeBytes: file.lengthSync(),
+    );
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MarkdownViewerPage(note: note, repoRoot: repo.path),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 打开查找条并输入
+    await tester.tap(find.byIcon(Icons.search));
+    await tester.pump();
+    expect(find.text('在本文中查找'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).first, '关键词');
+    await tester.pump();
+    expect(find.text('1/2'), findsOneWidget);
+    // 当前命中所在行作为上下文预览显示
+    expect(find.textContaining('关键词 在这里'), findsWidgets);
+
+    await tester.tap(find.byTooltip('下一处'));
+    await tester.pump();
+    expect(find.text('2/2'), findsOneWidget);
+
+    // 下一处再回到第一处（循环）
+    await tester.tap(find.byTooltip('下一处'));
+    await tester.pump();
+    expect(find.text('1/2'), findsOneWidget);
+
+    // 无匹配时给出明确提示
+    await tester.enterText(find.byType(TextField).first, '不存在的词');
+    await tester.pump();
+    expect(find.text('无匹配'), findsOneWidget);
+
+    // 关闭后查找条消失
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pump();
+    expect(find.text('在本文中查找'), findsNothing);
+  });
+}

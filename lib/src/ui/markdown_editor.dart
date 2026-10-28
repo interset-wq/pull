@@ -2,13 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:mermaid_flutter/mermaid_flutter.dart';
-import 'package:saf/saf.dart';
 
 import '../local/local_folder_service.dart';
 import '../notes/math_render.dart';
@@ -70,13 +68,24 @@ class _MarkdownEditorPageState extends State<MarkdownEditorPage> {
     if (_saving) return false;
     setState(() => _saving = true);
     final text = _controller.text;
+    var mirrorOk = false;
     var sourceOk = false;
     String? sourceError;
     try {
       await File(widget.filePath).writeAsString(text, flush: true);
+      mirrorOk = true;
       sourceOk = await _writeBackSource(text);
     } on Object catch (e) {
       sourceError = e.toString();
+    }
+    // 源侧没写成功时记录待写回：下次打开文件夹会增量同步，若无此记录
+    // 源侧的旧内容会把镜像里的修改覆盖掉（改不可见地丢失）
+    if (mirrorOk) {
+      if (sourceOk) {
+        LocalFolderService.clearPending(widget.mirrorRoot, widget.relativePath);
+      } else {
+        LocalFolderService.markPending(widget.mirrorRoot, widget.relativePath);
+      }
     }
     if (!mounted) return false;
     setState(() {
@@ -92,53 +101,23 @@ class _MarkdownEditorPageState extends State<MarkdownEditorPage> {
       SnackBar(
         content: Text(
           sourceError == null
-              ? '镜像已保存，但写回原文件夹失败'
-              : '写回原文件夹失败：$sourceError',
+              ? '镜像已保存，写回原文件夹失败；已记录，可在设置里重试'
+              : '写回原文件夹失败：$sourceError（已记录，可在设置里重试）',
         ),
       ),
     );
     return false;
   }
 
-  /// 写回用户授权的原文件夹。Android 经 SAF（tree URI + 逐段解析到文件）；
-  /// 桌面 folder.uri 即真实路径，直接覆盖同名文件。
+  /// 写回用户授权的原文件夹（SAF / 桌面真实路径共用服务层实现）。
   Future<bool> _writeBackSource(String text) async {
     final folder = await LocalFolderService.matchMirror(widget.mirrorRoot);
     if (folder == null) return false;
-    if (Platform.isAndroid) {
-      final segments = widget.relativePath.split('/');
-      final name = segments.removeLast();
-      // 逐段 child() 解析到目标文件；找父目录失败说明原文件夹结构已变
-      var dirUri = folder.uri;
-      for (final seg in segments) {
-        final d = await Saf().child(dirUri, [seg]);
-        if (d == null || !d.isDir) return false;
-        dirUri = d.uri;
-      }
-      try {
-        await Saf().writeFileBytes(
-          dirUri,
-          name,
-          'text/markdown',
-          Uint8List.fromList(utf8.encode(text)),
-          overwrite: true,
-        );
-        return true;
-      } on Object {
-        return false;
-      }
-    }
-    try {
-      final target = File(
-        '${folder.uri}${Platform.pathSeparator}'
-        '${widget.relativePath.replaceAll('/', Platform.pathSeparator)}',
-      );
-      if (!target.existsSync()) return false;
-      await target.writeAsString(text, flush: true);
-      return true;
-    } on Object {
-      return false;
-    }
+    return LocalFolderService.writeBack(
+      folder,
+      widget.relativePath,
+      utf8.encode(text),
+    );
   }
 
   Future<void> _confirmDiscard() async {

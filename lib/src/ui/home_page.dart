@@ -8,14 +8,21 @@ import 'package:path_provider/path_provider.dart';
 import '../git/repo_meta.dart';
 import '../git/sync_service.dart';
 import '../local/local_folder_service.dart';
+import '../notes/link_check.dart';
+import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
+import '../search/repo_search.dart';
+import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
+import 'global_search_page.dart';
 import 'image_gallery.dart';
 import 'markdown_viewer.dart';
+import 'search_snippet_text.dart';
 import 'settings_page.dart';
+import 'tag_page.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
 /// 移动端优先：大卡片、下拉刷新、底部导航结构。
@@ -81,6 +88,16 @@ class _HomePageState extends State<HomePage> {
     }
     final dir = await LocalFolderService.mirrorDir(folder.name);
     if (!mounted) return;
+    // 增量同步会跳过「编辑器保存过但没写回源文件夹」的文件；这里明确
+    // 提示，避免用户以为源文件夹已经是最新
+    final pending = LocalFolderService.pendingCount(dir.path);
+    if (pending > 0) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('$pending 个修改尚未写回原文件夹（设置 → 未写回的修改）'),
+        ),
+      );
+    }
     Navigator.push(
       context,
       MaterialPageRoute<void>(
@@ -95,10 +112,12 @@ class _HomePageState extends State<HomePage> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await LocalFolderService.syncFolder(folder);
+      final dir = await LocalFolderService.mirrorDir(folder.name);
+      final pending = LocalFolderService.pendingCount(dir.path);
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('已刷新'),
-          duration: Duration(seconds: 1),
+        SnackBar(
+          content: Text(pending > 0 ? '已刷新；$pending 个修改尚未写回' : '已刷新'),
+          duration: const Duration(seconds: 2),
         ),
       );
     } on Object catch (e) {
@@ -150,15 +169,34 @@ class _HomePageState extends State<HomePage> {
     await _loadRepos();
   }
 
-  Future<void> _loadRepos() async {
-    final root = await _reposRoot;
+  /// 打开标签页：仓库 + 本地文件夹镜像一起聚合（跨来源）。
+  Future<void> _openTags(List<Directory> repos) async {
+    final roots = <Directory>[...repos];
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      roots.add(await LocalFolderService.mirrorDir(folder.name));
+    }
     if (!mounted) return;
-    final dirs = root
-        .listSync(followLinks: false)
-        .whereType<Directory>()
-        .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
-            .existsSync())
-        .toList();
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => TagPage(roots: roots)),
+    );
+  }
+
+  Future<void> _loadRepos() async {
+    List<Directory> dirs;
+    try {
+      final root = await _reposRoot;
+      dirs = root
+          .listSync(followLinks: false)
+          .whereType<Directory>()
+          .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
+              .existsSync())
+          .toList();
+    } on Object {
+      // 取不到文档目录（权限异常/测试环境）时不要永远转圈，按空列表展示
+      dirs = const [];
+    }
+    if (!mounted) return;
     // 置顶（Roadmap「仓库管理·仓库置顶」）固定在最前，其余保持原顺序
     dirs.sort((a, b) {
       final pa = RepoMeta.isPinned(a.path) ? 0 : 1;
@@ -183,6 +221,25 @@ class _HomePageState extends State<HomePage> {
           height: 40,
         ),
         actions: [
+          IconButton(
+            tooltip: '搜索全部仓库',
+            icon: const Icon(Icons.search),
+            onPressed: repos.isEmpty
+                ? null
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => GlobalSearchPage(repos: repos),
+                      ),
+                    ),
+          ),
+          IconButton(
+            tooltip: '标签',
+            icon: const Icon(Icons.sell_outlined),
+            onPressed: (repos.isEmpty && locals.isEmpty)
+                ? null
+                : () => _openTags(repos),
+          ),
           IconButton(
             tooltip: '全部更新',
             icon: _updatingAll
@@ -282,9 +339,14 @@ class _HomePageState extends State<HomePage> {
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
                         if (i == 0) {
+                          final resume = _continueReading(repos);
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (resume != null) ...[
+                                _buildContinueCard(resume),
+                                const SizedBox(height: 16),
+                              ],
                               _buildFileStrip(
                                 repos,
                                 title: '⭐ 收藏',
@@ -395,6 +457,7 @@ class _HomePageState extends State<HomePage> {
                           name: name,
                           source: meta?.source,
                           lastOpened: meta?.lastOpened,
+                          syncedAt: meta?.syncedAt,
                           pinned: RepoMeta.isPinned(repo.path),
                           onTogglePin: () {
                             RepoMeta.togglePin(repo.path);
@@ -406,6 +469,80 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
             ),
+    );
+  }
+
+  /// 「继续阅读」候选：最近阅读里第一篇文章，且进度在 (2%, 98%) 之间
+  /// （刚开始读的 0% 和已读完的不值得单独占一张卡）。
+  (Directory, String, double)? _continueReading(List<Directory> repos) {
+    for (final (repo, relPath) in _collectRecents(repos)) {
+      final (fraction, _) = RepoMeta.readProgressInfo(repo.path, relPath);
+      if (fraction <= 0.02 || fraction >= 0.98) continue;
+      final file = File(
+        '${repo.path}${Platform.pathSeparator}'
+        '${relPath.replaceAll('/', Platform.pathSeparator)}',
+      );
+      if (!file.existsSync()) continue;
+      return (repo, relPath, fraction);
+    }
+    return null;
+  }
+
+  /// 首页顶部「继续阅读」卡：直接回到上次读到的位置。
+  Widget _buildContinueCard((Directory, String, double) resume) {
+    final (repo, relPath, fraction) = resume;
+    final theme = Theme.of(context);
+    final repoName = repo.path.split(Platform.pathSeparator).last;
+    final fileName = relPath.split('/').last;
+    return Material(
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openRecentFile(repo, relPath),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                Icons.play_circle_outline,
+                color: theme.colorScheme.primary,
+                size: 30,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '继续阅读',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$repoName · 已读 ${(fraction * 100).round()}%',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -549,7 +686,10 @@ class _HomePageState extends State<HomePage> {
           repoRoot: repo.path,
         ),
       ),
-    );
+    ).then((_) {
+      // 阅读页会更新进度：回到首页刷新「继续阅读」与「最近阅读」
+      if (mounted) setState(() {});
+    });
   }
 
   void _openRepo(Directory repoDir) {
@@ -585,6 +725,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await _sync.deleteRepo(repo.path);
       RepoMeta.remove(repo.path);
+      NoteIndexCache.remove(repo.path);
       await _loadRepos();
     } on Exception catch (e) {
       if (mounted) {
@@ -842,6 +983,17 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// 仓库卡片。
+/// 相对时间文案（仓库卡「同步于 …」）。
+String _relativeTime(DateTime time) {
+  final diff = DateTime.now().difference(time);
+  if (diff.inMinutes < 1) return '刚刚';
+  if (diff.inHours < 1) return '${diff.inMinutes} 分钟前';
+  if (diff.inDays < 1) return '${diff.inHours} 小时前';
+  if (diff.inDays < 30) return '${diff.inDays} 天前';
+  return '${time.year}-${time.month.toString().padLeft(2, '0')}-'
+      '${time.day.toString().padLeft(2, '0')}';
+}
+
 class _RepoCard extends StatelessWidget {
   const _RepoCard({
     required this.name,
@@ -851,6 +1003,7 @@ class _RepoCard extends StatelessWidget {
     required this.onTogglePin,
     this.source,
     this.lastOpened,
+    this.syncedAt,
   });
 
   final String name;
@@ -866,6 +1019,9 @@ class _RepoCard extends StatelessWidget {
 
   /// 最近打开的文件（仓库相对路径），未记录时为 null。
   final String? lastOpened;
+
+  /// 最近一次成功同步时间，未记录时为 null。
+  final DateTime? syncedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -910,6 +1066,17 @@ class _RepoCard extends StatelessWidget {
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
+                    ],
+                    if (syncedAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '同步于 ${_relativeTime(syncedAt!)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                     if (last != null) ...[
                       const SizedBox(height: 2),
@@ -1032,6 +1199,21 @@ class _RepoPageState extends State<RepoPage> {
   }();
   List<NoteFile>? _allNotes;
   String _query = '';
+  bool _scanning = false;
+  int _scanSeq = 0;
+
+  // 正文搜索（全文）：文件名搜索是同步过滤，正文搜索走后台 isolate + 防抖
+  bool _contentMode = false;
+  Timer? _searchDebounce;
+  List<FileSearchResult>? _contentResults;
+  bool _contentSearching = false;
+  int _contentSeq = 0;
+
+  /// 断链检查进行中（只读检查，不修改仓库）。
+  bool _linkChecking = false;
+
+  /// 文件排序：按名称（自然序，默认）或按修改时间（新的在前）。
+  bool _sortByModified = false;
 
   // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
   final Set<String> _expandedDirs = <String>{};
@@ -1044,11 +1226,171 @@ class _RepoPageState extends State<RepoPage> {
   @override
   void initState() {
     super.initState();
-    _allNotes = _scanner.scan(widget.repoDir.path);
+    // 先用磁盘缓存渲染首帧（大仓库不必等递归扫描），后台再重扫校正
+    _allNotes = NoteIndexCache.read(widget.repoDir.path);
+    _scanNotes();
   }
 
-  void _refresh() {
-    setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
+  Future<void> _refresh() => _scanNotes();
+
+  /// 后台 isolate 扫描：UI 线程不做递归 listSync；更新的扫描会顶掉旧结果。
+  Future<void> _scanNotes() async {
+    final seq = ++_scanSeq;
+    if (mounted) setState(() => _scanning = true);
+    try {
+      final files = await scanNotesInBackground(
+        widget.repoDir.path,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted || seq != _scanSeq) return;
+      setState(() => _allNotes = files);
+      await NoteIndexCache.write(widget.repoDir.path, files);
+    } on Object {
+      // 扫描失败保留缓存/旧列表，不打断阅读
+    } finally {
+      if (mounted && seq == _scanSeq) setState(() => _scanning = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// 搜索框输入：文件名模式同步过滤；正文模式防抖后跑后台检索。
+  void _onQueryChanged(String value) {
+    final q = value.toLowerCase();
+    setState(() {
+      _query = q;
+      _contentResults = null;
+    });
+    _searchDebounce?.cancel();
+    if (!_contentMode) return;
+    if (q.trim().length < 2) {
+      setState(() => _contentSearching = false);
+      return;
+    }
+    setState(() => _contentSearching = true);
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 350), _runContentSearch);
+  }
+
+  /// 切换「文件名 / 正文」搜索。
+  void _toggleContentMode() {
+    _searchDebounce?.cancel();
+    setState(() {
+      _contentMode = !_contentMode;
+      _contentResults = null;
+      _contentSearching = false;
+    });
+    if (_contentMode && _query.trim().length >= 2) {
+      setState(() => _contentSearching = true);
+      _runContentSearch();
+    }
+  }
+
+  Future<void> _runContentSearch() async {
+    final q = _query.trim();
+    if (q.length < 2) return;
+    final seq = ++_contentSeq;
+    setState(() => _contentSearching = true);
+    try {
+      final results = await RepoSearchService.search(
+        repoRoot: widget.repoDir.path,
+        query: q,
+        files: _allNotes,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted || seq != _contentSeq) return;
+      setState(() {
+        _contentResults = results;
+        _contentSearching = false;
+      });
+    } on Object {
+      if (!mounted || seq != _contentSeq) return;
+      setState(() {
+        _contentSearching = false;
+        _contentResults = const [];
+      });
+    }
+  }
+
+  /// 检查远端是否有新提交：先告知数量，再决定是否 pull（不改本地分支）。
+  Future<void> _checkUpdates() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('正在检查远端…'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    final RemoteStatus status;
+    try {
+      status = await GitSyncService().checkRemote(repoDir: widget.repoDir);
+    } on Object catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('检查失败：$e')));
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (status.upToDate) {
+      messenger.showSnackBar(const SnackBar(content: Text('已是最新')));
+      return;
+    }
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('发现更新'),
+        content: Text(
+          status.behind > 100
+              ? '远端有 100+ 个新提交，是否立即更新？'
+              : '远端有 ${status.behind} 个新提交，是否立即更新？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('立即更新'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) await _pull();
+  }
+
+  /// 检查仓库内相对链接/图片是否仍然存在（只读，不改任何文件）。
+  Future<void> _checkLinks() async {
+    if (_linkChecking) return;
+    setState(() => _linkChecking = true);
+    try {
+      final broken = await LinkChecker.check(
+        repoRoot: widget.repoDir.path,
+        files: _allNotes,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => _BrokenLinksSheet(broken: broken),
+      );
+    } on Object catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('检查失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _linkChecking = false);
+    }
   }
 
   /// 经典模式：当前目录下的子文件夹（应用 ignore 规则），排序后返回名称。
@@ -1065,6 +1407,13 @@ class _RepoPageState extends State<RepoPage> {
       ..sort(compareNatural);
   }
 
+  /// 文件排序：名称（自然序）或最近修改（新的在前）。
+  int _compareNotes(NoteFile a, NoteFile b) {
+    if (!_sortByModified) return compareNatural(a.fileName, b.fileName);
+    final byTime = b.modified.compareTo(a.modified);
+    return byTime != 0 ? byTime : compareNatural(a.fileName, b.fileName);
+  }
+
   /// 经典模式：当前目录下的 Markdown 笔记。
   List<NoteFile> _localNotes() {
     final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
@@ -1074,7 +1423,7 @@ class _RepoPageState extends State<RepoPage> {
             .substring(prefix.length)
             .contains('/'))
         .toList()
-      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+      ..sort(_compareNotes);
   }
 
   /// 构建目录树条目：目录行就地展开/折叠（_expandedDirs 控制），
@@ -1105,7 +1454,7 @@ class _RepoPageState extends State<RepoPage> {
           .where((n) => n.relativePath.startsWith(prefix))
           .where((n) => !n.relativePath.substring(prefix.length).contains('/'))
           .toList()
-        ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+        ..sort(_compareNotes);
 
       for (final name in dirs) {
         final rel = '$prefix$name';
@@ -1132,6 +1481,8 @@ class _RepoPageState extends State<RepoPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final searching = _query.isNotEmpty;
+    // 正文搜索：搜索框输入的内容去 md/ipynb/txt 正文里找（后台 isolate）
+    final contentSearch = _contentMode && searching;
     final repoName = widget.repoDir.path.split(Platform.pathSeparator).last;
     final title = widget.subPath.isEmpty
         ? repoName
@@ -1142,7 +1493,7 @@ class _RepoPageState extends State<RepoPage> {
     // 指向目录的本地链接可正常跳转
     final treeMode =
         !searching && (AppPrefs.instance?.treeMode ?? false);
-    final notes = searching ? _searchAll() : _localNotes();
+    final notes = searching && !_contentMode ? _searchAll() : _localNotes();
     final dirs = treeMode ? const <String>[] : _subDirs();
     final entries = treeMode ? _treeEntries() : null;
     final isEmpty = treeMode
@@ -1169,6 +1520,33 @@ class _RepoPageState extends State<RepoPage> {
             icon: const Icon(Icons.sync),
             tooltip: '同步',
           ),
+          IconButton(
+            tooltip: _sortByModified ? '按名称排序' : '按修改时间排序',
+            icon: Icon(
+              _sortByModified ? Icons.sort_by_alpha : Icons.schedule,
+            ),
+            onPressed: () =>
+                setState(() => _sortByModified = !_sortByModified),
+          ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (value) {
+              switch (value) {
+                case 'updates':
+                  _checkUpdates();
+                case 'links':
+                  _checkLinks();
+              }
+            },
+            itemBuilder: (_) => [
+              if (!LocalFolderService.isLocalMirror(widget.repoDir.path))
+                const PopupMenuItem(
+                  value: 'updates',
+                  child: Text('检查更新'),
+                ),
+              const PopupMenuItem(value: 'links', child: Text('检查断链')),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -1176,28 +1554,53 @@ class _RepoPageState extends State<RepoPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: SearchBar(
-              hintText: searching ? '搜索中…' : '搜索文件',
+              hintText: _contentMode
+                  ? (searching ? '搜索正文…' : '搜索正文')
+                  : (searching ? '搜索中…' : '搜索文件'),
               leading: const Icon(Icons.search),
               elevation: const WidgetStatePropertyAll(0),
               constraints: const BoxConstraints(minHeight: 44),
-              trailing: searching
-                  ? [
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(() => _query = ''),
-                      ),
-                    ]
-                  : null,
-              onChanged: (v) => setState(() => _query = v.toLowerCase()),
+              trailing: [
+                IconButton(
+                  tooltip: _contentMode ? '搜索文件名' : '搜索正文',
+                  icon: Icon(
+                    _contentMode ? Icons.title : Icons.subject,
+                    size: 20,
+                  ),
+                  onPressed: _toggleContentMode,
+                ),
+                if (searching)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      _searchDebounce?.cancel();
+                      setState(() {
+                        _query = '';
+                        _contentResults = null;
+                        _contentSearching = false;
+                      });
+                    },
+                  ),
+              ],
+              onChanged: _onQueryChanged,
             ),
           ),
+          if (_scanning || _linkChecking)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
-            child: RefreshIndicator(
+            child: contentSearch
+                ? _buildContentResults(theme)
+                : RefreshIndicator(
               onRefresh: _pull,
               child: isEmpty
-                  ? ListView(children: const [
-                      SizedBox(height: 120),
-                      Center(child: Text('这里没有文件')),
+                  ? ListView(children: [
+                      const SizedBox(height: 120),
+                      // 首次扫描（无缓存）时显示进度，而不是误报「这里没有文件」
+                      Center(
+                        child: _allNotes == null
+                            ? const CircularProgressIndicator()
+                            : const Text('这里没有文件'),
+                      ),
                     ])
                   : searching
                       // 搜索模式：扁平结果列表，显示相对路径
@@ -1401,6 +1804,94 @@ class _RepoPageState extends State<RepoPage> {
     );
   }
 
+  /// 正文搜索结果：文件分组 + 命中摘要 + 命中次数。
+  Widget _buildContentResults(ThemeData theme) {
+    if (_query.trim().length < 2) {
+      return const Center(child: Text('输入至少 2 个字符搜索正文'));
+    }
+    if (_contentSearching && _contentResults == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final results = _contentResults ?? const <FileSearchResult>[];
+    if (results.isEmpty) {
+      return Center(
+        child: Text(_contentSearching ? '搜索中…' : '没有匹配的正文'),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 32),
+      itemCount: results.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final result = results[i];
+        final name = result.relativePath.split('/').last;
+        return ListTile(
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              Text(
+                '${result.matches} 处',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                result.relativePath,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              for (final snippet in result.snippets)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: SearchSnippetText(snippet: snippet),
+                ),
+            ],
+          ),
+          onTap: () => _openByRelativePath(result.relativePath),
+        );
+      },
+    );
+  }
+
+  /// 正文结果点击：优先复用已扫描的 NoteFile，冷启动时按路径现造一个。
+  void _openByRelativePath(String relativePath) {
+    for (final note in _allNotes ?? const <NoteFile>[]) {
+      if (note.relativePath == relativePath) {
+        _openFile(note);
+        return;
+      }
+    }
+    final file = File(
+      '${widget.repoDir.path}${Platform.pathSeparator}'
+      '${relativePath.replaceAll('/', Platform.pathSeparator)}',
+    );
+    if (!file.existsSync()) return;
+    final stat = file.statSync();
+    _openFile(
+      NoteFile(
+        relativePath: relativePath,
+        absolutePath: file.path,
+        modified: stat.modified,
+        sizeBytes: stat.size,
+      ),
+    );
+  }
+
   /// 全仓库扁平搜索（仅搜索模式使用）。
   List<NoteFile> _searchAll() {
     return (_allNotes ?? const <NoteFile>[])
@@ -1461,7 +1952,7 @@ class _RepoPageState extends State<RepoPage> {
       }
       try {
         await LocalFolderService.syncFolder(folder);
-        _refresh();
+        await _refresh();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -1482,7 +1973,8 @@ class _RepoPageState extends State<RepoPage> {
       final result = await GitSyncService().pull(
         repoDir: widget.repoDir,
       );
-      _refresh();
+      RepoMeta.touchSynced(widget.repoDir.path);
+      await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1529,4 +2021,100 @@ class _TreeEntry {
   final bool isEmptyPlaceholder;
 
   bool get isDir => dirRel != null;
+}
+
+/// 断链清单：按来源文件分组展示，可一键复制。
+class _BrokenLinksSheet extends StatelessWidget {
+  const _BrokenLinksSheet({required this.broken});
+
+  final List<BrokenLink> broken;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final height = MediaQuery.of(context).size.height * 0.6;
+    return SizedBox(
+      height: height,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    broken.isEmpty ? '没有发现断链' : '断链 ${broken.length} 处',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                if (broken.isNotEmpty)
+                  TextButton(
+                    onPressed: () async {
+                      final text = broken
+                          .map((b) =>
+                              '${b.sourceRelativePath} -> ${b.target}')
+                          .join('\n');
+                      await Clipboard.setData(ClipboardData(text: text));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('已复制断链清单')),
+                        );
+                      }
+                    },
+                    child: const Text('复制清单'),
+                  ),
+                IconButton(
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: broken.isEmpty
+                ? Center(
+                    child: Text(
+                      '所有相对链接与图片都能在仓库里找到',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: broken.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final item = broken[i];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          item.isImage
+                              ? Icons.broken_image_outlined
+                              : Icons.link_off,
+                          size: 20,
+                          color: theme.colorScheme.error,
+                        ),
+                        title: Text(
+                          item.target,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          item.sourceRelativePath,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -25,6 +25,7 @@ import '../notes/details_syntax.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
 import '../notes/math_render.dart';
+import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../utils/markdown_plain_text.dart';
 import '../utils/text_encoding.dart';
@@ -46,11 +47,16 @@ class MarkdownViewerPage extends StatefulWidget {
   const MarkdownViewerPage({
     required this.note,
     required this.repoRoot,
+    this.initialFindQuery,
     super.key,
   });
 
   final NoteFile note;
   final String repoRoot;
+
+  /// 从正文搜索结果进入时携带的检索词：加载完成后自动打开查找条并
+  /// 定位到第一处命中（否则用户得自己再滚到命中位置）。
+  final String? initialFindQuery;
 
   /// 匹配 <img src="...">（属性顺序任意、单双引号均可、含尾部其余属性）。
   static final RegExp _htmlImgRegExp = RegExp(
@@ -245,11 +251,24 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   int _siblingIndex = -1;
 
   /// 计算同目录文章列表与当前位置（供 上一篇/下一篇）。
-  void _loadSiblings() {
+  ///
+  /// 优先用仓库文件索引缓存：打开文章时递归扫描整个仓库在大仓库上会明显
+  /// 卡顿（与仓库页的后台扫描重复）。缓存缺失才后台扫描并回写缓存。
+  Future<void> _loadSiblings() async {
     final rel = widget.note.relativePath.replaceAll('\\', '/');
-    final dirPart = rel.contains('/') ? rel.substring(0, rel.lastIndexOf('/') + 1) : '';
-    final siblings = NoteScanner()
-        .scan(widget.repoRoot)
+    final dirPart =
+        rel.contains('/') ? rel.substring(0, rel.lastIndexOf('/') + 1) : '';
+    var files = NoteIndexCache.read(widget.repoRoot);
+    if (files == null) {
+      try {
+        files = await scanNotesInBackground(widget.repoRoot);
+        await NoteIndexCache.write(widget.repoRoot, files);
+      } on Object {
+        return;
+      }
+    }
+    if (!mounted) return;
+    final siblings = files
         .where((n) => n.relativePath.replaceAll('\\', '/').startsWith(dirPart))
         .where((n) => !n.relativePath
             .replaceAll('\\', '/')
@@ -257,8 +276,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             .contains('/'))
         .toList()
       ..sort((a, b) => compareNatural(a.fileName, b.fileName));
-    _siblings = siblings;
-    _siblingIndex = siblings.indexWhere((n) => n.relativePath == rel);
+    setState(() {
+      _siblings = siblings;
+      _siblingIndex = siblings.indexWhere((n) => n.relativePath == rel);
+    });
   }
 
   @override
@@ -317,15 +338,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     // 进度：询问一次是否跳回（不强转）；之后按 800ms 节流保存比例位置
     final max = _scrollController.position.maxScrollExtent;
     if (_restorePending) {
-      _restorePending = false;
-      final (saved, headingIdx) = RepoMeta.readProgressInfo(
-        widget.repoRoot,
-        widget.note.relativePath,
-      );
-      // 有些用户不需要跳回（比如想从头重读），只提示不强跳
-      if (saved > 0.005 && max > 0) {
-        _offerProgressRestore(saved, headingIdx);
-      }
+      _maybeRestoreProgress();
       return;
     }
     if (max > 0 &&
@@ -340,47 +353,50 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     }
   }
 
-  /// 有历史阅读进度时弹模态框询问「是否跳回上次位置」，
-  /// 用户选择「从头开始」则从开头读，不再强行跳转。
-  void _offerProgressRestore(double saved, int? headingIdx) {
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('上次读到此处'),
-        content: Text('是否跳转到上次阅读位置（约 ${(saved * 100).round()}%）？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('从头开始'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              if (!mounted || !_scrollController.hasClients) return;
-              // 标题锚点优先：字号/窗口变化导致布局高度漂移时，
-              // 标题位置不受影响，比纯比例恢复更准
-              if (headingIdx != null &&
-                  headingIdx >= 0 &&
-                  headingIdx < _headingKeys.length &&
-                  _headingKeys[headingIdx].currentContext != null) {
-                Scrollable.ensureVisible(
-                  _headingKeys[headingIdx].currentContext!,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
-              } else {
-                _scrollController.animateTo(
-                  (saved * _scrollController.position.maxScrollExtent)
-                      .clamp(0.0, _scrollController.position.maxScrollExtent),
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
-              }
-            },
-            child: const Text('跳到上次位置'),
-          ),
-        ],
+  /// 首次布局完成后恢复上次阅读位置（也作为滚动时的兜底，只执行一次）。
+  /// 打开即续读：自动跳回并给「从头读」撤销入口，不再弹模态框打断。
+  void _maybeRestoreProgress() {
+    if (!_restorePending || !mounted) return;
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.maxScrollExtent <= 0) return;
+    _restorePending = false;
+    final (saved, headingIdx) = RepoMeta.readProgressInfo(
+      widget.repoRoot,
+      widget.note.relativePath,
+    );
+    if (saved > 0.005) _restoreProgress(saved, headingIdx);
+  }
+
+  /// 有历史阅读进度时自动跳回上次位置（标题锚点优先，比纯比例恢复更准），
+  /// 并给一个「从头读」的撤销入口。
+  void _restoreProgress(double saved, int? headingIdx) {
+    if (!mounted || !_scrollController.hasClients) return;
+    final headingCtx = (headingIdx != null &&
+            headingIdx >= 0 &&
+            headingIdx < _headingKeys.length)
+        ? _headingKeys[headingIdx].currentContext
+        : null;
+    if (headingCtx != null) {
+      Scrollable.ensureVisible(
+        headingCtx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    } else {
+      final max = _scrollController.position.maxScrollExtent;
+      _scrollController.animateTo(
+        (saved * max).clamp(0.0, max),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('已回到上次位置（约 ${(saved * 100).round()}%）'),
+        duration: const Duration(seconds: 3),
+        action: SnackBarAction(label: '从头读', onPressed: _scrollToTop),
       ),
     );
   }
@@ -436,8 +452,34 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _headingKeys
       ..clear()
       ..addAll(List.generate(_toc.length, (_) => GlobalKey()));
+
+    // 从搜索结果进入：自动打开查找条并定位到第一处命中。跳转依赖布局
+    // 完成（标题锚点/滚动范围），放到首帧之后；同时跳过续读恢复，
+    // 避免两个滚动动作互相打架
+    final initialFind = (widget.initialFindQuery ?? '').trim();
+    if (initialFind.isNotEmpty) {
+      _restorePending = false;
+      _findOpen = true;
+      _findQuery = initialFind;
+      _findController.text = initialFind;
+      _findMatches = findTextMatches(body, initialFind);
+      _findIndex = _findMatches.isEmpty ? -1 : 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // 上一篇文章的「已回到上次位置」提示会随根级 SnackBar 跟过来，
+        // 在搜索结果打开的新文章上显示会造成误解
+        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+        if (_findMatches.isNotEmpty) _jumpToMatch(0);
+      });
+    }
+
     _imageUrls = MarkdownViewerPage.collectImageUrls(body);
     _readingMinutes = _estimateReadingMinutes(body);
+    // 首帧布局完成后恢复位置：不依赖用户先滚一下才触发
+    if (_restorePending) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _maybeRestoreProgress());
+    }
     return body;
   }
 
@@ -1868,7 +1910,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 Expanded(
                   child: TextField(
                     controller: _findController,
-                    autofocus: true,
+                    // 从搜索结果带词进来时不自动弹键盘：用户是来读的，
+                    // 需要改词再点一下输入框即可
+                    autofocus: _findQuery.isEmpty,
                     textInputAction: TextInputAction.search,
                     decoration: const InputDecoration(
                       isDense: true,
@@ -2148,6 +2192,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     // 路径，入口统一解码对齐。
     final src = decodeMarkdownUrl(url.trim());
     final index = _imageUrls.indexOf(src);
+    // 按屏宽限制解码尺寸：截图/照片按原图解码动辄几十 MB，长文多图时
+    // 会明显抖动甚至 OOM；图库仍按原图（可放大看细节）
+    final rawWidth =
+        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+            .round();
+    final decodeWidth = rawWidth < 320 ? 320 : (rawWidth > 2048 ? 2048 : rawWidth);
     return GestureDetector(
       onTap: () => _openGallery(index < 0 ? 0 : index),
       child: Padding(
@@ -2157,7 +2207,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           // 浅色垫底：透明 PNG/SVG 图表按白底设计，深色主题下不可读
           child: Hero(
             tag: 'img-$src',
-            child: buildRepoImage(src, baseDir: _noteDir, backdrop: true),
+            child: buildRepoImage(
+              src,
+              baseDir: _noteDir,
+              backdrop: true,
+              maxWidth: decodeWidth,
+            ),
           ),
         ),
       ),

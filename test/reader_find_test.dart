@@ -71,4 +71,41 @@ void main() {
     await tester.pump();
     expect(find.text('在本文中查找'), findsNothing);
   });
+
+  testWidgets('opening from a search result pre-fills the find bar',
+      (tester) async {
+    final repo = Directory.systemTemp.createTempSync('reader-find-initial');
+    addTearDown(() {
+      if (repo.existsSync()) repo.deleteSync(recursive: true);
+    });
+    final file = File('${repo.path}${Platform.pathSeparator}note.md')
+      ..writeAsStringSync(
+        '# 一\n\n关键词 A\n\n## 二\n\n关键词 B\n\n关键词 C\n',
+      );
+    final note = NoteFile(
+      relativePath: 'note.md',
+      absolutePath: file.path,
+      modified: file.statSync().modified,
+      sizeBytes: file.lengthSync(),
+    );
+
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MarkdownViewerPage(
+            note: note,
+            repoRoot: repo.path,
+            initialFindQuery: '关键词',
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 查找条已打开并统计出全部命中，首处已定位
+    expect(find.text('1/3'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+  });
 }

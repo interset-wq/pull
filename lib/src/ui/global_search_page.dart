@@ -236,6 +236,8 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
             sizeBytes: stat.size,
           ),
           repoRoot: hit.repo.path,
+          // 带着检索词进阅读页：自动打开查找条并定位到第一处命中
+          initialFindQuery: _query,
         ),
       ),
     );

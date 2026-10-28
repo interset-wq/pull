@@ -16,8 +16,10 @@ import '../search/repo_search.dart';
 import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
+import 'global_search_page.dart';
 import 'image_gallery.dart';
 import 'markdown_viewer.dart';
+import 'search_snippet_text.dart';
 import 'settings_page.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
@@ -204,6 +206,18 @@ class _HomePageState extends State<HomePage> {
           height: 40,
         ),
         actions: [
+          IconButton(
+            tooltip: '搜索全部仓库',
+            icon: const Icon(Icons.search),
+            onPressed: repos.isEmpty
+                ? null
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => GlobalSearchPage(repos: repos),
+                      ),
+                    ),
+          ),
           IconButton(
             tooltip: '全部更新',
             icon: _updatingAll
@@ -1679,43 +1693,13 @@ class _RepoPageState extends State<RepoPage> {
               for (final snippet in result.snippets)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: _highlightedSnippet(theme, snippet),
+                  child: SearchSnippetText(snippet: snippet),
                 ),
             ],
           ),
           onTap: () => _openByRelativePath(result.relativePath),
         );
       },
-    );
-  }
-
-  /// 命中片段：命中处用主题色底色高亮（偏移由检索层给出，不做二次匹配）。
-  Widget _highlightedSnippet(ThemeData theme, SearchSnippet snippet) {
-    final base = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-      height: 1.3,
-    );
-    final hit = base?.copyWith(
-      color: theme.colorScheme.onPrimaryContainer,
-      backgroundColor: theme.colorScheme.primaryContainer,
-      fontWeight: FontWeight.w600,
-    );
-    final text = snippet.text;
-    final start = snippet.matchStart.clamp(0, text.length).toInt();
-    final end =
-        (snippet.matchStart + snippet.matchLength).clamp(start, text.length).toInt();
-    return Text.rich(
-      TextSpan(
-        children: [
-          if (start > 0) TextSpan(text: text.substring(0, start), style: base),
-          if (end > start)
-            TextSpan(text: text.substring(start, end), style: hit),
-          if (end < text.length)
-            TextSpan(text: text.substring(end), style: base),
-        ],
-      ),
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
     );
   }
 

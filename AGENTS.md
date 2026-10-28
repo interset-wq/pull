@@ -46,10 +46,12 @@
   `<reposRoot>/.meta/index/<仓库名>.json`；进入仓库页先用缓存渲染、再后台
   重扫校正（stale-while-revalidate）。删除仓库/本地文件夹时一并清理该缓存。
 - **正文检索**（`lib/src/search/`）：仓库页搜索框可切换「文件名 / 正文」；
-  正文检索在 isolate 内读 md/ipynb/txt（单文件 ≤2MB）做线性匹配，返回
-  命中次数 + 上下文摘要（带命中偏移供高亮）。**刻意不建倒排索引**：中文
-  2-gram 的 postings 条目数与正文字符数同量级，序列化后往往比正文本身还大，
-  而笔记仓库正文只有几 MB，页缓存 + `indexOf` 足够快且无索引过期问题。
+  首页搜索图标进入 `lib/src/ui/global_search_page.dart` 跨仓库检索（逐仓库
+  顺序执行、结果流式分组）。正文检索在 isolate 内读 md/ipynb/txt（单文件
+  ≤2MB）做线性匹配，返回命中次数 + 上下文摘要（带命中偏移供
+  `SearchSnippetText` 高亮）。**刻意不建倒排索引**：中文 2-gram 的 postings
+  条目数与正文字符数同量级，序列化后往往比正文本身还大，而笔记仓库正文只有
+  几 MB，页缓存 + `indexOf` 足够快且无索引过期问题。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

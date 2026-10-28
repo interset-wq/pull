@@ -93,10 +93,10 @@ class AppPrefs extends ChangeNotifier {
   bool get swipePaging => _swipePaging ?? false;
 
   // 表格自然宽度开关：开启后表格始终按内容固有宽度渲染、超出视口横向
-  // 滚动（v0.1.0 行为，单元格不换行）；默认关闭——超宽表格自动切换为
-  // 按比例分摊的换行档（7e42d04 行为）
+  // 滚动（v0.1.0 行为，单元格不换行）；默认开启——关闭时超宽表格自动
+  // 切换为按比例分摊的换行档（7e42d04 行为）
   bool? _wideTable;
-  bool get wideTable => _wideTable ?? false;
+  bool get wideTable => _wideTable ?? true;
 
   // Ignore 配置（Roadmap「设置增强·Ignore 配置」）：默认隐藏规则开关
   // （点开头的文件/目录名，.git 恒忽略，见 NoteScanner）+
@@ -138,7 +138,7 @@ class AppPrefs extends ChangeNotifier {
     var platform = GitPlatform.gitcode;
     var owner = '';
     var codeFont = kCodeFontJetBrains;
-    var keepScreenOn = false;
+    var keepScreenOn = true;
     var codeLineNumbers = true;
     var codeFoldThreshold = 30;
     var lineHeight = 1.75;
@@ -147,7 +147,7 @@ class AppPrefs extends ChangeNotifier {
     var recentsLimit = 5;
     var appIcon = 'book';
     var swipePaging = false;
-    var wideTable = false;
+    var wideTable = true;
     var ignoreDefaults = true;
     var ignoreRules = const <String>[];
     var detailsExpanded = true;
@@ -169,7 +169,7 @@ class AppPrefs extends ChangeNotifier {
       codeFont = kCodeFontChoices.contains(sp.getString(_codeFontKey))
           ? sp.getString(_codeFontKey)!
           : kCodeFontJetBrains;
-      keepScreenOn = sp.getBool(_keepScreenOnKey) ?? false;
+      keepScreenOn = sp.getBool(_keepScreenOnKey) ?? true;
       // 旧版本曾用 setString 存 '1'/'0'，getBool 会抛类型异常被吞掉
       // 回退默认——兼容两种存量形态
       codeLineNumbers = switch (sp.get(_codeLineNumbersKey)) {
@@ -184,7 +184,7 @@ class AppPrefs extends ChangeNotifier {
       recentsLimit = (sp.getInt(_recentsLimitKey) ?? 5).clamp(1, 20);
       appIcon = sp.getString(_appIconKey) ?? 'book';
       swipePaging = sp.getBool(_swipePagingKey) ?? false;
-      wideTable = sp.getBool(_wideTableKey) ?? false;
+      wideTable = sp.getBool(_wideTableKey) ?? true;
       ignoreDefaults = sp.getBool(_ignoreDefaultsKey) ?? true;
       ignoreRules = sp.getStringList(_ignoreRulesKey) ?? const <String>[];
       detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;

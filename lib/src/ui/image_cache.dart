@@ -5,6 +5,17 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 
+/// 条件请求校验器：图床返回的 ETag / Last-Modified，二者有其一即可发起
+/// If-None-Match / If-Modified-Since，服务器未变时回 304，不重传图片本体。
+class CachedValidators {
+  const CachedValidators({this.etag, this.lastModified});
+
+  final String? etag;
+  final String? lastModified;
+
+  bool get hasAny => etag != null || lastModified != null;
+}
+
 /// 一个缓存文件的元信息（纯数据，便于单测淘汰策略）。
 class CacheFileInfo {
   const CacheFileInfo({
@@ -25,6 +36,7 @@ class CacheFileInfo {
 /// 读写失败一律静默：缓存只是锦上添花，不能影响正文渲染。
 class ImageDiskCache {
   static const _dirName = 'imgcache';
+  static const _metaExt = '.meta';
 
   /// 缓存总量上限：200MB（约几百张截图，对手机可接受）。
   static const maxBytes = 200 * 1024 * 1024;
@@ -85,11 +97,64 @@ class ImageDiskCache {
     }
   }
 
+  /// 读取上次下载保存的校验器；服务器未提供或损坏返回 null。
+  static Future<CachedValidators?> readValidators(String url) async {
+    try {
+      final file = await _metaFileFor(url);
+      if (!file.existsSync()) return null;
+      final map = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final v = CachedValidators(
+        etag: map['etag'] as String?,
+        lastModified: map['lastModified'] as String?,
+      );
+      return v.hasAny ? v : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 保存校验器；两个都没有时不写文件（发了条件头也是整图 200，无意义）。
+  static Future<void> storeValidators(
+    String url,
+    String? etag,
+    String? lastModified,
+  ) async {
+    try {
+      final file = await _metaFileFor(url);
+      if (etag == null && lastModified == null) {
+        if (file.existsSync()) file.deleteSync();
+        return;
+      }
+      await file.writeAsString(
+        jsonEncode({'etag': etag, 'lastModified': lastModified}),
+        flush: true,
+      );
+    } on Object {
+      // 忽略
+    }
+  }
+
+  /// 304 命中后刷新缓存文件 mtime：既重置 7 天过期窗口，也让 LRU 认为它最近用过。
+  static Future<void> touch(String url) async {
+    try {
+      final file = await _fileFor(url);
+      if (!file.existsSync()) return;
+      final now = DateTime.now();
+      file.setLastModifiedSync(now);
+      final meta = await _metaFileFor(url);
+      if (meta.existsSync()) meta.setLastModifiedSync(now);
+    } on Object {
+      // 忽略
+    }
+  }
+
   /// 删除单条缓存（解码失败时让下次重新下载）。
   static Future<void> remove(String url) async {
     try {
       final file = await _fileFor(url);
       if (file.existsSync()) file.deleteSync();
+      final meta = await _metaFileFor(url);
+      if (meta.existsSync()) meta.deleteSync();
     } on Object {
       // 忽略
     }
@@ -100,10 +165,19 @@ class ImageDiskCache {
     return File('${dir.path}${Platform.pathSeparator}${keyFor(url)}');
   }
 
+  static Future<File> _metaFileFor(String url) async {
+    final dir = await _ensureDir();
+    return File('${dir.path}${Platform.pathSeparator}${keyFor(url)}$_metaExt');
+  }
+
   static Future<void> _trim() async {
     try {
       final dir = await _ensureDir();
-      final files = dir.listSync().whereType<File>();
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => !f.path.endsWith(_metaExt))
+          .toList();
       final infos = <CacheFileInfo>[];
       for (final f in files) {
         final stat = f.statSync();

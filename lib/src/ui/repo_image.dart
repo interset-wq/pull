@@ -98,15 +98,40 @@ class _NetworkImageState extends State<_NetworkImage> {
     return fresh;
   }
 
-  Future<Uint8List?> _download() async {
+  /// 条件请求下载：带校验器时服务器未变会回 304，直接用缓存字节
+  /// （不重传图片本体），并刷新缓存 mtime 重置过期窗口。
+  /// [force] 跳过条件头（手动重试场景，缓存可能损坏）。
+  Future<Uint8List?> _download({bool force = false}) async {
     try {
+      final headers = <String, String>{'User-Agent': 'Mozilla/5.0'};
+      if (!force) {
+        final v = await ImageDiskCache.readValidators(widget.url);
+        if (v?.etag != null) {
+          headers['If-None-Match'] = v!.etag!;
+        } else if (v?.lastModified != null) {
+          headers['If-Modified-Since'] = v!.lastModified!;
+        }
+      }
       final res = await http
-          .get(
-            Uri.parse(widget.url),
-            headers: const {'User-Agent': 'Mozilla/5.0'},
-          )
+          .get(Uri.parse(widget.url), headers: headers)
           .timeout(const Duration(seconds: 30));
-      return res.statusCode == 200 ? res.bodyBytes : null;
+      if (res.statusCode == 304) {
+        final cached = await ImageDiskCache.read(widget.url);
+        if (cached != null) {
+          await ImageDiskCache.touch(widget.url);
+          return cached;
+        }
+        return null; // 缓存已丢，只能等下次整图下载
+      }
+      if (res.statusCode == 200) {
+        await ImageDiskCache.storeValidators(
+          widget.url,
+          res.headers['etag'],
+          res.headers['last-modified'],
+        );
+        return res.bodyBytes;
+      }
+      return null;
     } catch (_) {
       return null;
     }

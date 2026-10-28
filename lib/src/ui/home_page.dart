@@ -164,14 +164,20 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadRepos() async {
-    final root = await _reposRoot;
+    List<Directory> dirs;
+    try {
+      final root = await _reposRoot;
+      dirs = root
+          .listSync(followLinks: false)
+          .whereType<Directory>()
+          .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
+              .existsSync())
+          .toList();
+    } on Object {
+      // 取不到文档目录（权限异常/测试环境）时不要永远转圈，按空列表展示
+      dirs = const [];
+    }
     if (!mounted) return;
-    final dirs = root
-        .listSync(followLinks: false)
-        .whereType<Directory>()
-        .where((d) => Directory('${d.path}${Platform.pathSeparator}.git')
-            .existsSync())
-        .toList();
     // 置顶（Roadmap「仓库管理·仓库置顶」）固定在最前，其余保持原顺序
     dirs.sort((a, b) {
       final pa = RepoMeta.isPinned(a.path) ? 0 : 1;

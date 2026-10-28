@@ -21,6 +21,7 @@ import 'image_gallery.dart';
 import 'markdown_viewer.dart';
 import 'search_snippet_text.dart';
 import 'settings_page.dart';
+import 'tag_page.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
 /// 移动端优先：大卡片、下拉刷新、底部导航结构。
@@ -167,6 +168,19 @@ class _HomePageState extends State<HomePage> {
     await _loadRepos();
   }
 
+  /// 打开标签页：仓库 + 本地文件夹镜像一起聚合（跨来源）。
+  Future<void> _openTags(List<Directory> repos) async {
+    final roots = <Directory>[...repos];
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      roots.add(await LocalFolderService.mirrorDir(folder.name));
+    }
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => TagPage(roots: roots)),
+    );
+  }
+
   Future<void> _loadRepos() async {
     List<Directory> dirs;
     try {
@@ -217,6 +231,13 @@ class _HomePageState extends State<HomePage> {
                         builder: (_) => GlobalSearchPage(repos: repos),
                       ),
                     ),
+          ),
+          IconButton(
+            tooltip: '标签',
+            icon: const Icon(Icons.sell_outlined),
+            onPressed: (repos.isEmpty && locals.isEmpty)
+                ? null
+                : () => _openTags(repos),
           ),
           IconButton(
             tooltip: '全部更新',

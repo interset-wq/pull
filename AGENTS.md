@@ -56,6 +56,10 @@
   AppBar 搜索图标打开查找条（raw 模式不提供）；命中按行返回，行号与
   `extractToc` 的 `TocEntry.line` 同一坐标系（都基于 front-matter/ipynb
   转换后的正文），跳转时定位到命中所属章节标题，无标题文档按字符比例滚动。
+- **标签聚合**（`lib/src/notes/tag_index.dart` + `lib/src/ui/tag_page.dart`）：
+  首页标签图标进入标签页，聚合所有仓库与本地文件夹镜像的 front-matter
+  `tags`（只读每个文件头 8KB，isolate 内扫描），点标签按 AND 跨仓库筛选；
+  多个标签同时选中即要求全部命中。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

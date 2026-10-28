@@ -24,6 +24,11 @@
 ETag/Last-Modified（`<key>.img` 旁 `.meta` sidecar），带
 If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过期
 窗口，不重传图片本体；手动重试跳过条件头。
+- **存储占用页**（`lib/src/ui/storage_page.dart` + `lib/src/utils/dir_size.dart`）：
+  设置「数据 → 存储占用」展示 `repos` / `local` / `imgcache` / `.meta`
+  四类目录的磁盘体积（体积统计在后台 isolate 递归累加）；图片缓存可
+  一键清理（删文件保留目录），元数据区提供清空阅读历史入口，
+  仓库/镜像的删除引导回首页对应卡片管理。
 - **本地文件夹阅读**（`lib/src/local/local_folder_service.dart`）：Android 走
   `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→
   **增量镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库

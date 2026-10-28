@@ -44,7 +44,7 @@
 
 ## 批次 B · 离线与空间（3–5 天）
 
-- [ ] **B1 存储占用页**：设置「数据」下显示 repos / 本地镜像 / imgcache /
+- [x] **B1 存储占用页**：设置「数据」下显示 repos / 本地镜像 / imgcache /
   元数据各占多少，单项清理带确认；imgcache 清理走 `image_cache.dart` 现有
   目录约定。*验收*：能看出 200MB 花在哪、能删。
 - [ ] **B2 克隆/拉取进度**：isolate 内 `transferProgress`（对象数/字节）经

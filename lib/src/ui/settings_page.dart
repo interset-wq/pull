@@ -11,6 +11,7 @@ import '../local/mirror_state.dart';
 import '../platforms/git_platform.dart';
 import '../theme/app_prefs.dart';
 import 'code_font.dart' show kCodeFontConsolas, kCodeFontJetBrains;
+import 'storage_page.dart';
 
 /// 应用发布页（GitHub Releases，CI 自动构建发布），供手动下载最新 APK。
 const String kReleaseUrl = 'https://github.com/interset-wq/pullread/releases';
@@ -340,6 +341,17 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const _PendingEditsTile(),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.storage_outlined),
+            title: const Text('存储占用'),
+            subtitle: const Text('查看仓库、镜像、图片缓存与元数据各占多少，可清理'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(builder: (_) => const StoragePage()),
+            ),
+          ),
           AnimatedBuilder(
             animation: prefs,
             builder: (context, _) => SwitchListTile(

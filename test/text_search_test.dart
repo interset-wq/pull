@@ -92,4 +92,30 @@ void main() {
       expect(r.snippets.single.text.contains('\r'), isFalse);
     });
   });
+
+  group('findTextMatches 文内查找', () {
+    test('返回每处命中的偏移、行号与整行文本', () {
+      const text = '# 标题\n第一行 关键词 在这里\n\n第二段 关键词\n';
+      final matches = findTextMatches(text, '关键词');
+      expect(matches.length, 2);
+      expect(matches[0].line, 1);
+      expect(matches[0].lineText, '第一行 关键词 在这里');
+      expect(text.substring(matches[0].offset, matches[0].offset + 3), '关键词');
+      expect(matches[1].line, 3);
+    });
+
+    test('大小写不敏感，空查询返回空列表', () {
+      const text = 'Flutter\nflutter';
+      expect(findTextMatches(text, 'FLUTTER').length, 2);
+      expect(findTextMatches(text, '   '), isEmpty);
+      expect(findTextMatches('', 'x'), isEmpty);
+    });
+
+    test('行号与 toc 的 line 同一坐标系（含 CRLF）', () {
+      const text = '# 第一章\r\n正文\r\n## 第二章\r\n关键词\r\n';
+      final matches = findTextMatches(text, '关键词');
+      expect(matches.single.line, 3);
+      expect(matches.single.lineText, '关键词');
+    });
+  });
 }

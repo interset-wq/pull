@@ -52,6 +52,10 @@
   `SearchSnippetText` 高亮）。**刻意不建倒排索引**：中文 2-gram 的 postings
   条目数与正文字符数同量级，序列化后往往比正文本身还大，而笔记仓库正文只有
   几 MB，页缓存 + `indexOf` 足够快且无索引过期问题。
+- **文内查找**（`lib/src/ui/markdown_viewer.dart` + `findTextMatches`）：阅读页
+  AppBar 搜索图标打开查找条（raw 模式不提供）；命中按行返回，行号与
+  `extractToc` 的 `TocEntry.line` 同一坐标系（都基于 front-matter/ipynb
+  转换后的正文），跳转时定位到命中所属章节标题，无标题文档按字符比例滚动。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

@@ -83,6 +83,63 @@ FileSearchResult? searchInText({
   );
 }
 
+/// 文内查找的一处命中。
+class TextMatch {
+  const TextMatch({
+    required this.offset,
+    required this.line,
+    required this.lineText,
+  });
+
+  /// 在全文中的字符下标。
+  final int offset;
+
+  /// 所在行（0 基），与 `extractToc` 的行号同一坐标系，便于按章节定位。
+  final int line;
+
+  /// 该行原文（已去首尾空白），用于查找条里的上下文预览。
+  final String lineText;
+}
+
+/// 找出 [text] 中 [query] 的全部命中（大小写不敏感、按出现顺序）。
+///
+/// 供阅读页「文内查找」使用：命中按行号返回，调用方再按 TOC 的
+/// `TocEntry.line` 定位到所在章节滚动。
+List<TextMatch> findTextMatches(String text, String query) {
+  final q = query.trim();
+  if (q.isEmpty || text.isEmpty) return const [];
+  final needle = q.toLowerCase();
+  final haystack = text.toLowerCase();
+  if (needle.length > haystack.length) return const [];
+  final lineStarts = _lineStarts(text);
+  final out = <TextMatch>[];
+  var from = 0;
+  while (from <= haystack.length - needle.length) {
+    final at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    final line = _lineOf(lineStarts, at);
+    out.add(
+      TextMatch(
+        offset: at,
+        line: line,
+        lineText: _lineText(text, lineStarts, line).trim(),
+      ),
+    );
+    from = at + needle.length;
+  }
+  return out;
+}
+
+/// 取第 [line] 行的原文（不含换行符；CRLF 会去掉 `\r`）。
+String _lineText(String content, List<int> starts, int line) {
+  final lineStart = starts[line];
+  var lineEnd = line + 1 < starts.length ? starts[line + 1] - 1 : content.length;
+  if (lineEnd > lineStart && content.codeUnitAt(lineEnd - 1) == 0x0D) {
+    lineEnd--;
+  }
+  return content.substring(lineStart, lineEnd);
+}
+
 /// 每行起始下标（0 基），用于把字符下标换算成行号。
 List<int> _lineStarts(String content) {
   final starts = <int>[0];
@@ -115,13 +172,7 @@ SearchSnippet _snippetAt(
   int matchLength,
 ) {
   final lineStart = starts[line];
-  var lineEnd = line + 1 < starts.length
-      ? starts[line + 1] - 1
-      : content.length;
-  if (lineEnd > lineStart && content.codeUnitAt(lineEnd - 1) == 0x0D) {
-    lineEnd--; // CRLF
-  }
-  final raw = content.substring(lineStart, lineEnd);
+  final raw = _lineText(content, starts, line);
   final matchInLine = matchAt - lineStart;
 
   // 行太长时围绕命中位置截断，保证命中一定落在片段里

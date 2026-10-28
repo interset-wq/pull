@@ -29,6 +29,7 @@ import '../notes/note_scanner.dart';
 import '../utils/markdown_plain_text.dart';
 import '../utils/text_encoding.dart';
 import '../notes/toc.dart';
+import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
 import 'copy_button.dart';
@@ -183,6 +184,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 剩余阅读时间（分钟，_load 时估算一次）。
   int _readingMinutes = 0;
 
+  /// 渲染用正文（front-matter/ipynb 转换之后），与 [_toc] 的行号同一坐标系。
+  String? _bodySource;
+
+  // ---- 文内查找 ----
+  bool _findOpen = false;
+  final TextEditingController _findController = TextEditingController();
+  String _findQuery = '';
+  List<TextMatch> _findMatches = const [];
+  int _findIndex = -1;
+
   /// 最近一次进入视口的标题索引（进度记忆的锚点）。
   int _lastHeadingIndex = -1;
 
@@ -287,6 +298,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _currentSection.dispose();
     _progressNotifier.dispose();
     _forceExpand.dispose();
+    _findController.dispose();
     super.dispose();
   }
 
@@ -419,6 +431,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       body = fm.body;
     }
     body = MarkdownViewerPage.normalizeHtmlImages(body);
+    _bodySource = body;
     _toc = extractToc(body);
     _headingKeys
       ..clear()
@@ -471,6 +484,13 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ),
         actions: [
+          // 文内查找：raw 模式没有渲染锚点，定位无意义，仅在渲染视图提供
+          if (!_showRaw)
+            IconButton(
+              tooltip: _findOpen ? '关闭查找' : '查找',
+              icon: Icon(_findOpen ? Icons.search_off : Icons.search),
+              onPressed: _toggleFind,
+            ),
           IconButton(
             tooltip: _starred ? '取消收藏' : '收藏',
             icon: Icon(
@@ -592,36 +612,45 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           ),
         ],
       ),
-      body: _showRaw
-          ? _buildRawView(theme)
-          : FutureBuilder<String>(
-            future: _content,
-            builder: (context, snapshot) {
-              // 加载失败（文件损坏/ipynb JSON 无效等）明确提示，
-              // 不能落到 !hasData 分支永远转圈
-              if (snapshot.hasError) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      '加载失败：${snapshot.error}',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+      body: Column(
+        children: [
+          if (_findOpen) _buildFindBar(theme),
+          Expanded(
+            child: _showRaw
+                ? _buildRawView(theme)
+                : FutureBuilder<String>(
+                    future: _content,
+                    builder: (context, snapshot) {
+                      // 加载失败（文件损坏/ipynb JSON 无效等）明确提示，
+                      // 不能落到 !hasData 分支永远转圈
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Text(
+                              '加载失败：${snapshot.error}',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
+                      final fontSize = _fontSizes[_fontIndex];
+                      final isDark = theme.brightness == Brightness.dark;
+                      final config = _markdownConfig(theme, isDark, fontSize);
+                      return _renderBody(snapshot.data!, theme, config);
+                    },
                   ),
-                );
-              }
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final fontSize = _fontSizes[_fontIndex];
-              final isDark = theme.brightness == Brightness.dark;
-              final config = _markdownConfig(theme, isDark, fontSize);
-              return _renderBody(snapshot.data!, theme, config);
-            },
           ),
+        ],
+      ),
       bottomNavigationBar: _buildFooterNav(theme),
     );
   }
@@ -1743,6 +1772,146 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
       alignment: 0,
+    );
+  }
+
+  // ---- 文内查找（Roadmap「检索·文内查找」） ----
+
+  void _toggleFind() {
+    if (_findOpen) {
+      _closeFind();
+      return;
+    }
+    setState(() => _findOpen = true);
+  }
+
+  void _closeFind() {
+    setState(() {
+      _findOpen = false;
+      _findQuery = '';
+      _findMatches = const [];
+      _findIndex = -1;
+    });
+    _findController.clear();
+  }
+
+  void _onFindChanged(String value) {
+    final q = value.trim();
+    final source = _bodySource ?? '';
+    final matches = q.isEmpty ? const <TextMatch>[] : findTextMatches(source, q);
+    setState(() {
+      _findQuery = q;
+      _findMatches = matches;
+      _findIndex = matches.isEmpty ? -1 : 0;
+    });
+    if (matches.isNotEmpty) _jumpToMatch(0);
+  }
+
+  void _findNext() {
+    if (_findMatches.isEmpty) return;
+    _jumpToMatch((_findIndex + 1) % _findMatches.length);
+  }
+
+  void _findPrev() {
+    if (_findMatches.isEmpty) return;
+    _jumpToMatch((_findIndex - 1 + _findMatches.length) % _findMatches.length);
+  }
+
+  /// 跳到第 [index] 处命中：用命中行号找到所属章节（TOC 的 line 与正文
+  /// 同一坐标系），滚到该标题；没有标题时按字符比例估算滚动位置。
+  void _jumpToMatch(int index) {
+    if (index < 0 || index >= _findMatches.length) return;
+    final match = _findMatches[index];
+    setState(() => _findIndex = index);
+    var heading = -1;
+    for (var i = 0; i < _toc.length; i++) {
+      if (_toc[i].line <= match.line) {
+        heading = i;
+      } else {
+        break;
+      }
+    }
+    if (heading >= 0 && heading < _headingKeys.length) {
+      _jumpToHeadingTop(heading);
+      return;
+    }
+    final total = _bodySource?.length ?? 0;
+    if (total == 0 || !_scrollController.hasClients) return;
+    final fraction = (match.offset / total).clamp(0.0, 1.0);
+    _scrollController.animateTo(
+      fraction * _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// 查找条：输入框 + 命中计数 + 上一处/下一处 + 当前命中所在行预览。
+  Widget _buildFindBar(ThemeData theme) {
+    final hasMatches = _findMatches.isNotEmpty;
+    final label = _findQuery.isEmpty
+        ? ''
+        : hasMatches
+            ? '${_findIndex + 1}/${_findMatches.length}'
+            : '无匹配';
+    final current = _findIndex >= 0 && _findIndex < _findMatches.length
+        ? _findMatches[_findIndex].lineText
+        : '';
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _findController,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: '在本文中查找',
+                    ),
+                    onChanged: _onFindChanged,
+                    onSubmitted: (_) => _findNext(),
+                  ),
+                ),
+                Text(label, style: theme.textTheme.labelSmall),
+                IconButton(
+                  tooltip: '上一处',
+                  icon: const Icon(Icons.keyboard_arrow_up, size: 22),
+                  onPressed: hasMatches ? _findPrev : null,
+                ),
+                IconButton(
+                  tooltip: '下一处',
+                  icon: const Icon(Icons.keyboard_arrow_down, size: 22),
+                  onPressed: hasMatches ? _findNext : null,
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: _closeFind,
+                ),
+              ],
+            ),
+            if (current.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 4),
+                child: Text(
+                  current,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

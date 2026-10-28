@@ -301,9 +301,14 @@ class _HomePageState extends State<HomePage> {
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
                         if (i == 0) {
+                          final resume = _continueReading(repos);
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (resume != null) ...[
+                                _buildContinueCard(resume),
+                                const SizedBox(height: 16),
+                              ],
                               _buildFileStrip(
                                 repos,
                                 title: '⭐ 收藏',
@@ -425,6 +430,80 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
             ),
+    );
+  }
+
+  /// 「继续阅读」候选：最近阅读里第一篇文章，且进度在 (2%, 98%) 之间
+  /// （刚开始读的 0% 和已读完的不值得单独占一张卡）。
+  (Directory, String, double)? _continueReading(List<Directory> repos) {
+    for (final (repo, relPath) in _collectRecents(repos)) {
+      final (fraction, _) = RepoMeta.readProgressInfo(repo.path, relPath);
+      if (fraction <= 0.02 || fraction >= 0.98) continue;
+      final file = File(
+        '${repo.path}${Platform.pathSeparator}'
+        '${relPath.replaceAll('/', Platform.pathSeparator)}',
+      );
+      if (!file.existsSync()) continue;
+      return (repo, relPath, fraction);
+    }
+    return null;
+  }
+
+  /// 首页顶部「继续阅读」卡：直接回到上次读到的位置。
+  Widget _buildContinueCard((Directory, String, double) resume) {
+    final (repo, relPath, fraction) = resume;
+    final theme = Theme.of(context);
+    final repoName = repo.path.split(Platform.pathSeparator).last;
+    final fileName = relPath.split('/').last;
+    return Material(
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openRecentFile(repo, relPath),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                Icons.play_circle_outline,
+                color: theme.colorScheme.primary,
+                size: 30,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '继续阅读',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$repoName · 已读 ${(fraction * 100).round()}%',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -568,7 +647,10 @@ class _HomePageState extends State<HomePage> {
           repoRoot: repo.path,
         ),
       ),
-    );
+    ).then((_) {
+      // 阅读页会更新进度：回到首页刷新「继续阅读」与「最近阅读」
+      if (mounted) setState(() {});
+    });
   }
 
   void _openRepo(Directory repoDir) {

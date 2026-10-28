@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
+
+import 'image_cache.dart';
 
 /// 统一图片加载：相对路径基于 [baseDir]（markdown 文件所在目录）解析，
 /// 支持 ./ 与 ../ 相对层级；网络图片直接加载（SVG 自动识别渲染），
@@ -65,9 +68,24 @@ class _NetworkImage extends StatefulWidget {
 }
 
 class _NetworkImageState extends State<_NetworkImage> {
-  late Future<Uint8List?> _bytes = _fetch();
+  late Future<Uint8List?> _bytes = _load();
 
-  Future<Uint8List?> _fetch() async {
+  /// 先看磁盘缓存：离线/弱网时已读过的图片立刻出图，不再等 30 秒超时。
+  /// 缓存超过 7 天会在后台悄悄刷新一次，本次仍用旧图（不阻塞渲染）。
+  Future<Uint8List?> _load() async {
+    final cached = await ImageDiskCache.read(widget.url);
+    if (cached != null) {
+      if (await ImageDiskCache.isStale(widget.url)) {
+        unawaited(_refreshInBackground());
+      }
+      return cached;
+    }
+    final fresh = await _download();
+    if (fresh != null) await ImageDiskCache.store(widget.url, fresh);
+    return fresh;
+  }
+
+  Future<Uint8List?> _download() async {
     try {
       final res = await http
           .get(
@@ -81,7 +99,22 @@ class _NetworkImageState extends State<_NetworkImage> {
     }
   }
 
-  void _retry() => setState(() => _bytes = _fetch());
+  Future<void> _refreshInBackground() async {
+    final fresh = await _download();
+    if (fresh != null) await ImageDiskCache.store(widget.url, fresh);
+  }
+
+  /// 手动重试：丢弃可能损坏的缓存，直接重新下载。
+  void _retry() {
+    setState(() {
+      _bytes = () async {
+        await ImageDiskCache.remove(widget.url);
+        final fresh = await _download();
+        if (fresh != null) await ImageDiskCache.store(widget.url, fresh);
+        return fresh;
+      }();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,12 +134,17 @@ class _NetworkImageState extends State<_NetworkImage> {
         final bytes = snapshot.data;
         if (bytes == null) return _ImageErrorBox(onRetry: _retry);
         if (_looksLikeSvg(bytes)) {
-          return SvgPicture.memory(bytes, fit: widget.fit);
+          return SvgPicture.memory(
+            bytes,
+            fit: widget.fit,
+            errorBuilder: (_, _, _) => _ImageErrorBox(onRetry: _retry),
+          );
         }
         return Image.memory(
           bytes,
           fit: widget.fit,
           frameBuilder: _fadeIn,
+          errorBuilder: (_, _, _) => _ImageErrorBox(onRetry: _retry),
         );
       },
     );

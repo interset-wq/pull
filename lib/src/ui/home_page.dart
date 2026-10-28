@@ -12,6 +12,8 @@ import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
+import '../search/repo_search.dart';
+import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import 'code_viewer.dart';
 import 'image_gallery.dart';
@@ -1137,6 +1139,13 @@ class _RepoPageState extends State<RepoPage> {
   bool _scanning = false;
   int _scanSeq = 0;
 
+  // 正文搜索（全文）：文件名搜索是同步过滤，正文搜索走后台 isolate + 防抖
+  bool _contentMode = false;
+  Timer? _searchDebounce;
+  List<FileSearchResult>? _contentResults;
+  bool _contentSearching = false;
+  int _contentSeq = 0;
+
   // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
   final Set<String> _expandedDirs = <String>{};
 
@@ -1172,6 +1181,71 @@ class _RepoPageState extends State<RepoPage> {
       // 扫描失败保留缓存/旧列表，不打断阅读
     } finally {
       if (mounted && seq == _scanSeq) setState(() => _scanning = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// 搜索框输入：文件名模式同步过滤；正文模式防抖后跑后台检索。
+  void _onQueryChanged(String value) {
+    final q = value.toLowerCase();
+    setState(() {
+      _query = q;
+      _contentResults = null;
+    });
+    _searchDebounce?.cancel();
+    if (!_contentMode) return;
+    if (q.trim().length < 2) {
+      setState(() => _contentSearching = false);
+      return;
+    }
+    setState(() => _contentSearching = true);
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 350), _runContentSearch);
+  }
+
+  /// 切换「文件名 / 正文」搜索。
+  void _toggleContentMode() {
+    _searchDebounce?.cancel();
+    setState(() {
+      _contentMode = !_contentMode;
+      _contentResults = null;
+      _contentSearching = false;
+    });
+    if (_contentMode && _query.trim().length >= 2) {
+      setState(() => _contentSearching = true);
+      _runContentSearch();
+    }
+  }
+
+  Future<void> _runContentSearch() async {
+    final q = _query.trim();
+    if (q.length < 2) return;
+    final seq = ++_contentSeq;
+    setState(() => _contentSearching = true);
+    try {
+      final results = await RepoSearchService.search(
+        repoRoot: widget.repoDir.path,
+        query: q,
+        files: _allNotes,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted || seq != _contentSeq) return;
+      setState(() {
+        _contentResults = results;
+        _contentSearching = false;
+      });
+    } on Object {
+      if (!mounted || seq != _contentSeq) return;
+      setState(() {
+        _contentSearching = false;
+        _contentResults = const [];
+      });
     }
   }
 
@@ -1256,6 +1330,8 @@ class _RepoPageState extends State<RepoPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final searching = _query.isNotEmpty;
+    // 正文搜索：搜索框输入的内容去 md/ipynb/txt 正文里找（后台 isolate）
+    final contentSearch = _contentMode && searching;
     final repoName = widget.repoDir.path.split(Platform.pathSeparator).last;
     final title = widget.subPath.isEmpty
         ? repoName
@@ -1266,7 +1342,7 @@ class _RepoPageState extends State<RepoPage> {
     // 指向目录的本地链接可正常跳转
     final treeMode =
         !searching && (AppPrefs.instance?.treeMode ?? false);
-    final notes = searching ? _searchAll() : _localNotes();
+    final notes = searching && !_contentMode ? _searchAll() : _localNotes();
     final dirs = treeMode ? const <String>[] : _subDirs();
     final entries = treeMode ? _treeEntries() : null;
     final isEmpty = treeMode
@@ -1300,24 +1376,42 @@ class _RepoPageState extends State<RepoPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: SearchBar(
-              hintText: searching ? '搜索中…' : '搜索文件',
+              hintText: _contentMode
+                  ? (searching ? '搜索正文…' : '搜索正文')
+                  : (searching ? '搜索中…' : '搜索文件'),
               leading: const Icon(Icons.search),
               elevation: const WidgetStatePropertyAll(0),
               constraints: const BoxConstraints(minHeight: 44),
-              trailing: searching
-                  ? [
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(() => _query = ''),
-                      ),
-                    ]
-                  : null,
-              onChanged: (v) => setState(() => _query = v.toLowerCase()),
+              trailing: [
+                IconButton(
+                  tooltip: _contentMode ? '搜索文件名' : '搜索正文',
+                  icon: Icon(
+                    _contentMode ? Icons.title : Icons.subject,
+                    size: 20,
+                  ),
+                  onPressed: _toggleContentMode,
+                ),
+                if (searching)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      _searchDebounce?.cancel();
+                      setState(() {
+                        _query = '';
+                        _contentResults = null;
+                        _contentSearching = false;
+                      });
+                    },
+                  ),
+              ],
+              onChanged: _onQueryChanged,
             ),
           ),
           if (_scanning) const LinearProgressIndicator(minHeight: 2),
           Expanded(
-            child: RefreshIndicator(
+            child: contentSearch
+                ? _buildContentResults(theme)
+                : RefreshIndicator(
               onRefresh: _pull,
               child: isEmpty
                   ? ListView(children: [
@@ -1527,6 +1621,124 @@ class _RepoPageState extends State<RepoPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 正文搜索结果：文件分组 + 命中摘要 + 命中次数。
+  Widget _buildContentResults(ThemeData theme) {
+    if (_query.trim().length < 2) {
+      return const Center(child: Text('输入至少 2 个字符搜索正文'));
+    }
+    if (_contentSearching && _contentResults == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final results = _contentResults ?? const <FileSearchResult>[];
+    if (results.isEmpty) {
+      return Center(
+        child: Text(_contentSearching ? '搜索中…' : '没有匹配的正文'),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 32),
+      itemCount: results.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final result = results[i];
+        final name = result.relativePath.split('/').last;
+        return ListTile(
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              Text(
+                '${result.matches} 处',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                result.relativePath,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              for (final snippet in result.snippets)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: _highlightedSnippet(theme, snippet),
+                ),
+            ],
+          ),
+          onTap: () => _openByRelativePath(result.relativePath),
+        );
+      },
+    );
+  }
+
+  /// 命中片段：命中处用主题色底色高亮（偏移由检索层给出，不做二次匹配）。
+  Widget _highlightedSnippet(ThemeData theme, SearchSnippet snippet) {
+    final base = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      height: 1.3,
+    );
+    final hit = base?.copyWith(
+      color: theme.colorScheme.onPrimaryContainer,
+      backgroundColor: theme.colorScheme.primaryContainer,
+      fontWeight: FontWeight.w600,
+    );
+    final text = snippet.text;
+    final start = snippet.matchStart.clamp(0, text.length).toInt();
+    final end =
+        (snippet.matchStart + snippet.matchLength).clamp(start, text.length).toInt();
+    return Text.rich(
+      TextSpan(
+        children: [
+          if (start > 0) TextSpan(text: text.substring(0, start), style: base),
+          if (end > start)
+            TextSpan(text: text.substring(start, end), style: hit),
+          if (end < text.length)
+            TextSpan(text: text.substring(end), style: base),
+        ],
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  /// 正文结果点击：优先复用已扫描的 NoteFile，冷启动时按路径现造一个。
+  void _openByRelativePath(String relativePath) {
+    for (final note in _allNotes ?? const <NoteFile>[]) {
+      if (note.relativePath == relativePath) {
+        _openFile(note);
+        return;
+      }
+    }
+    final file = File(
+      '${widget.repoDir.path}${Platform.pathSeparator}'
+      '${relativePath.replaceAll('/', Platform.pathSeparator)}',
+    );
+    if (!file.existsSync()) return;
+    final stat = file.statSync();
+    _openFile(
+      NoteFile(
+        relativePath: relativePath,
+        absolutePath: file.path,
+        modified: stat.modified,
+        sizeBytes: stat.size,
       ),
     );
   }

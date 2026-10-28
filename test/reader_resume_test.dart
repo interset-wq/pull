@@ -48,5 +48,12 @@ void main() {
 
     expect(find.byType(AlertDialog), findsNothing, reason: '续读不再弹模态框');
     expect(find.textContaining('已回到上次位置'), findsOneWidget);
+
+    // 超时后提示必须自动消失：Flutter 3.47 起 action != null 默认
+    // persist=true（永不超时），须显式 persist:false——此断言防回归
+    await tester.pump(const Duration(seconds: 3, milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('已回到上次位置'), findsNothing,
+        reason: '「已回到上次位置」提示应在 3 秒后自动消失');
   });
 }

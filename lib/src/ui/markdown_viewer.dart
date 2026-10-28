@@ -396,6 +396,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       SnackBar(
         content: Text('已回到上次位置（约 ${(saved * 100).round()}%）'),
         duration: const Duration(seconds: 3),
+        // Flutter 3.47 起 action != null 默认 persist=true（永不超时），
+        // 提示会一直压在页面上；必须显式关闭，保留超时消失
+        persist: false,
         action: SnackBarAction(label: '从头读', onPressed: _scrollToTop),
       ),
     );

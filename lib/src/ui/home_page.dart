@@ -1869,10 +1869,13 @@ class _RepoPageState extends State<RepoPage> {
   }
 
   /// 正文结果点击：优先复用已扫描的 NoteFile，冷启动时按路径现造一个。
+  /// 从正文搜索进入时带上检索词，阅读页会自动定位到第一处命中。
   void _openByRelativePath(String relativePath) {
+    final findQuery =
+        _contentMode && _query.trim().length >= 2 ? _query.trim() : null;
     for (final note in _allNotes ?? const <NoteFile>[]) {
       if (note.relativePath == relativePath) {
-        _openFile(note);
+        _openFile(note, findQuery: findQuery);
         return;
       }
     }
@@ -1889,6 +1892,7 @@ class _RepoPageState extends State<RepoPage> {
         modified: stat.modified,
         sizeBytes: stat.size,
       ),
+      findQuery: findQuery,
     );
   }
 
@@ -1901,7 +1905,7 @@ class _RepoPageState extends State<RepoPage> {
         .toList();
   }
 
-  void _openFile(NoteFile note) {
+  void _openFile(NoteFile note, {String? findQuery}) {
     RepoMeta.touchLastOpened(widget.repoDir.path, note.relativePath);
     if (note.isMarkdown || note.isPlainText) {
       Navigator.push(
@@ -1910,6 +1914,7 @@ class _RepoPageState extends State<RepoPage> {
           builder: (_) => MarkdownViewerPage(
             note: note,
             repoRoot: widget.repoDir.path,
+            initialFindQuery: findQuery,
           ),
         ),
       );

@@ -14,20 +14,26 @@ import 'image_cache.dart';
 ///
 /// [backdrop] 为图片垫一层浅色背景：透明 PNG/SVG 图表多按白底设计，
 /// 深色主题下直接渲染会不可读；图库（黑底沉浸浏览）不开启。
+///
+/// [maxWidth] 是解码宽度上限（屏宽 × devicePixelRatio，由阅读页传入）：
+/// 截图/照片按原始分辨率解码会占几十 MB，长文多图时容易抖动甚至 OOM；
+/// 图库不传，保留原图细节。
 Widget buildRepoImage(
   String url, {
   required String baseDir,
   BoxFit fit = BoxFit.contain,
   bool backdrop = false,
+  int? maxWidth,
 }) {
   final clean = url.trim();
   final Widget child;
   if (clean.startsWith('http://') || clean.startsWith('https://')) {
-    child = _NetworkImage(url: clean, fit: fit);
+    child = _NetworkImage(url: clean, fit: fit, maxWidth: maxWidth);
   } else {
     child = Image.file(
       resolveRepoFile(decodeMarkdownUrl(clean), baseDir),
       fit: fit,
+      cacheWidth: maxWidth,
       frameBuilder: _fadeIn,
       errorBuilder: (_, _, _) => const _ImageErrorBox(),
     );
@@ -58,10 +64,17 @@ Widget _fadeIn(
 /// star-history 等）普遍返回 SVG，Image.network 无法解码，需走 flutter_svg。
 /// 加载中显示全宽占位；失败显示可重试的错误块。
 class _NetworkImage extends StatefulWidget {
-  const _NetworkImage({required this.url, required this.fit});
+  const _NetworkImage({
+    required this.url,
+    required this.fit,
+    this.maxWidth,
+  });
 
   final String url;
   final BoxFit fit;
+
+  /// 解码宽度上限；null 表示按原图解码（图库场景）。
+  final int? maxWidth;
 
   @override
   State<_NetworkImage> createState() => _NetworkImageState();
@@ -143,6 +156,7 @@ class _NetworkImageState extends State<_NetworkImage> {
         return Image.memory(
           bytes,
           fit: widget.fit,
+          cacheWidth: widget.maxWidth,
           frameBuilder: _fadeIn,
           errorBuilder: (_, _, _) => _ImageErrorBox(onRetry: _retry),
         );

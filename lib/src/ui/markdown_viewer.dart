@@ -465,7 +465,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _findMatches = findTextMatches(body, initialFind);
       _findIndex = _findMatches.isEmpty ? -1 : 0;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _findMatches.isNotEmpty) _jumpToMatch(0);
+        if (!mounted) return;
+        // 上一篇文章的「已回到上次位置」提示会随根级 SnackBar 跟过来，
+        // 在搜索结果打开的新文章上显示会造成误解
+        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+        if (_findMatches.isNotEmpty) _jumpToMatch(0);
       });
     }
 
@@ -1906,7 +1910,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 Expanded(
                   child: TextField(
                     controller: _findController,
-                    autofocus: true,
+                    // 从搜索结果带词进来时不自动弹键盘：用户是来读的，
+                    // 需要改词再点一下输入框即可
+                    autofocus: _findQuery.isEmpty,
                     textInputAction: TextInputAction.search,
                     decoration: const InputDecoration(
                       isDense: true,

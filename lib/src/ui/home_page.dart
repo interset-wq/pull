@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../git/repo_meta.dart';
 import '../git/sync_service.dart';
 import '../local/local_folder_service.dart';
+import '../notes/link_check.dart';
 import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
@@ -1181,6 +1182,9 @@ class _RepoPageState extends State<RepoPage> {
   bool _contentSearching = false;
   int _contentSeq = 0;
 
+  /// 断链检查进行中（只读检查，不修改仓库）。
+  bool _linkChecking = false;
+
   // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
   final Set<String> _expandedDirs = <String>{};
 
@@ -1281,6 +1285,34 @@ class _RepoPageState extends State<RepoPage> {
         _contentSearching = false;
         _contentResults = const [];
       });
+    }
+  }
+
+  /// 检查仓库内相对链接/图片是否仍然存在（只读，不改任何文件）。
+  Future<void> _checkLinks() async {
+    if (_linkChecking) return;
+    setState(() => _linkChecking = true);
+    try {
+      final broken = await LinkChecker.check(
+        repoRoot: widget.repoDir.path,
+        files: _allNotes,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => _BrokenLinksSheet(broken: broken),
+      );
+    } on Object catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('检查失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _linkChecking = false);
     }
   }
 
@@ -1404,6 +1436,15 @@ class _RepoPageState extends State<RepoPage> {
             icon: const Icon(Icons.sync),
             tooltip: '同步',
           ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (value) {
+              if (value == 'links') _checkLinks();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'links', child: Text('检查断链')),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -1442,7 +1483,8 @@ class _RepoPageState extends State<RepoPage> {
               onChanged: _onQueryChanged,
             ),
           ),
-          if (_scanning) const LinearProgressIndicator(minHeight: 2),
+          if (_scanning || _linkChecking)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: contentSearch
                 ? _buildContentResults(theme)
@@ -1876,4 +1918,100 @@ class _TreeEntry {
   final bool isEmptyPlaceholder;
 
   bool get isDir => dirRel != null;
+}
+
+/// 断链清单：按来源文件分组展示，可一键复制。
+class _BrokenLinksSheet extends StatelessWidget {
+  const _BrokenLinksSheet({required this.broken});
+
+  final List<BrokenLink> broken;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final height = MediaQuery.of(context).size.height * 0.6;
+    return SizedBox(
+      height: height,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    broken.isEmpty ? '没有发现断链' : '断链 ${broken.length} 处',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                if (broken.isNotEmpty)
+                  TextButton(
+                    onPressed: () async {
+                      final text = broken
+                          .map((b) =>
+                              '${b.sourceRelativePath} -> ${b.target}')
+                          .join('\n');
+                      await Clipboard.setData(ClipboardData(text: text));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('已复制断链清单')),
+                        );
+                      }
+                    },
+                    child: const Text('复制清单'),
+                  ),
+                IconButton(
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: broken.isEmpty
+                ? Center(
+                    child: Text(
+                      '所有相对链接与图片都能在仓库里找到',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: broken.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final item = broken[i];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          item.isImage
+                              ? Icons.broken_image_outlined
+                              : Icons.link_off,
+                          size: 20,
+                          color: theme.colorScheme.error,
+                        ),
+                        title: Text(
+                          item.target,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          item.sourceRelativePath,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }

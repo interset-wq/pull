@@ -107,7 +107,8 @@ lib/
 
 ## 🗺 路线图
 
-后续方向与已完成功能见 [Roadmap.md](Roadmap.md)（含明确的非目标边界）。
+后续方向与已完成功能见 [Roadmap.md](Roadmap.md)（含明确的非目标边界）；
+按代码缺口排出的分批落地计划见 [Roadmap.agent.md](Roadmap.agent.md)。
 
 ## 📄 许可证
 

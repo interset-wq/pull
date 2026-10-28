@@ -296,7 +296,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     HardwareKeyboard.instance.addHandler(_handleVolumeKey);
     // 屏幕常亮：仅阅读页生效，离开即恢复系统行为
     if (AppPrefs.instance?.keepScreenOn ?? false) {
-      WakelockPlus.enable();
+      WakelockPlus.enable().catchError((Object _) {
+        // 平台通道不可用（如测试环境）时忽略，不影响阅读
+      });
     }
     AppPrefs.loadFontIndex().then((i) {
       if (mounted && i >= 0 && i < _fontSizes.length) {
@@ -312,7 +314,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
 
   @override
   void dispose() {
-    WakelockPlus.disable();
+    WakelockPlus.disable().catchError((Object _) {});
     HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -1423,6 +1425,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       // markdown 包把 <details> 当原始 HTML 文本（不产出元素），自定义
       // 块级语法必须注入，否则 details 生成器永远不会被调用
       blockSyntaxList: [DetailsBlockSyntax()],
+      // 查找词非空时给正文文本节点里的命中加底色（标题/加粗等富文本
+      // 内部的文本同样覆盖；链接、代码块等非 TextNode 节点不处理）
+      textGenerator: (node, config, visitor) {
+        final text = node is m.Text ? node.text : node.textContent;
+        return _FindHighlightNode(
+          text,
+          query: _findQuery,
+          style: config.p.textStyle,
+          highlightColor: theme.colorScheme.primary.withAlpha(70),
+        );
+      },
       generators: [
         SpanNodeGeneratorWithTag(
           tag: 'table',
@@ -2234,6 +2247,58 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         ),
       ),
     );
+  }
+}
+
+/// 文本节点查找高亮：查找词非空时把节点文本按命中切开，命中段加底色。
+/// 大小写不敏感，与 findTextMatches 保持一致；无命中/无查找词时退化为
+/// 普通 TextNode（样式合并行为与包内 TextNode 相同）。
+class _FindHighlightNode extends SpanNode {
+  _FindHighlightNode(
+    this.text, {
+    required this.query,
+    required this.highlightColor,
+    TextStyle? style,
+  }) : baseStyle = style;
+
+  final String text;
+  final String query;
+  final Color highlightColor;
+
+  /// 自身样式（通常为 config.p.textStyle），build 时与父级样式合并；
+  /// 不能叫 style——那是 SpanNode 的字段。
+  final TextStyle? baseStyle;
+
+  @override
+  InlineSpan build() {
+    final style = baseStyle?.merge(parentStyle);
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty || !text.toLowerCase().contains(q)) {
+      return TextSpan(text: text, style: style);
+    }
+    final lower = text.toLowerCase();
+    final spans = <TextSpan>[];
+    var start = 0;
+    while (true) {
+      final i = lower.indexOf(q, start);
+      if (i < 0) {
+        if (start < text.length) {
+          spans.add(TextSpan(text: text.substring(start)));
+        }
+        break;
+      }
+      if (i > start) {
+        spans.add(TextSpan(text: text.substring(start, i)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(i, i + q.length),
+          style: TextStyle(backgroundColor: highlightColor),
+        ),
+      );
+      start = i + q.length;
+    }
+    return TextSpan(children: spans, style: style);
   }
 }
 

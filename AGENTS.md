@@ -20,7 +20,10 @@
   - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。pull 用 `Isolate.run`；**clone 用 `Isolate.spawn` + `ReceivePort`**，超时 5 分钟时 `Isolate.kill` 并清理目标目录——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。
   - **构建陷阱**：`INTERNET` 权限必须声明在 `android/app/src/main/AndroidManifest.xml`——Flutter 模板默认只加在 debug/profile 变体，release 包无网络权限，所有 HTTPS 请求报 `GIT_ERROR_NET: No address associated with hostname`。
 - **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
-  - **远程图片缓存**（`lib/src/ui/image_cache.dart`）：网络图先读磁盘缓存，命中立即出图（离线可读，不再等 30s 超时）；URL 经双 32 位哈希落盘到 `<docs>/imgcache`，总量 >200MB 按写入时间淘汰；超过 7 天的缓存在后台静默刷新一次，下载失败回退缓存副本。
+  - **远程图片缓存**（`lib/src/ui/image_cache.dart`）：网络图先读磁盘缓存，命中立即出图（离线可读，不再等 30s 超时）；URL 经双 32 位哈希落盘到 `<docs>/imgcache`，总量 >200MB 按写入时间淘汰；超过 7 天的缓存在后台静默刷新一次，下载失败回退缓存副本。刷新与二次进入走条件请求：保存图床返回的
+ETag/Last-Modified（`<key>.img` 旁 `.meta` sidecar），带
+If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过期
+窗口，不重传图片本体；手动重试跳过条件头。
 - **本地文件夹阅读**（`lib/src/local/local_folder_service.dart`）：Android 走
   `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→
   **增量镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库
@@ -56,6 +59,9 @@
   AppBar 搜索图标打开查找条（raw 模式不提供）；命中按行返回，行号与
   `extractToc` 的 `TocEntry.line` 同一坐标系（都基于 front-matter/ipynb
   转换后的正文），跳转时定位到命中所属章节标题，无标题文档按字符比例滚动。
+  正文命中逐字加底色：`MarkdownGenerator.textGenerator` 接管纯文本节点
+  （`_FindHighlightNode`），查找词非空时把节点文本按命中切开上底色，
+  与 `findTextMatches` 同为大小写不敏感；链接/代码块等非文本节点不高亮。
 - **标签聚合**（`lib/src/notes/tag_index.dart` + `lib/src/ui/tag_page.dart`）：
   首页标签图标进入标签页，聚合所有仓库与本地文件夹镜像的 front-matter
   `tags`（只读每个文件头 8KB，isolate 内扫描），点标签按 AND 跨仓库筛选；

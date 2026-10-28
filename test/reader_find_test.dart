@@ -51,6 +51,8 @@ void main() {
     expect(find.text('1/2'), findsOneWidget);
     // 当前命中所在行作为上下文预览显示
     expect(find.textContaining('关键词 在这里'), findsWidgets);
+    // 正文渲染的文本节点里命中片段加了底色（逐字高亮）
+    expect(_spansWithBackground(tester), greaterThan(0));
 
     await tester.tap(find.byTooltip('下一处'));
     await tester.pump();
@@ -108,4 +110,21 @@ void main() {
     expect(find.text('1/3'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
   });
+}
+
+/// 统计渲染树里带背景色的 TextSpan 数量（查找命中底色高亮）。
+int _spansWithBackground(WidgetTester tester) {
+  var count = 0;
+  void walk(InlineSpan? span) {
+    if (span == null) return;
+    if (span is TextSpan && span.style?.backgroundColor != null) count++;
+    if (span is TextSpan) {
+      span.children?.forEach(walk);
+    }
+  }
+
+  tester.widgetList<RichText>(find.byType(RichText)).forEach((rich) {
+    if (rich.text is TextSpan) walk(rich.text as TextSpan);
+  });
+  return count;
 }

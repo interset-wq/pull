@@ -175,7 +175,20 @@ class GitSyncService {
         ..push(remoteOid)
         ..hide(localOid);
       final behind = walker.walk(limit: 101).length;
-      return RemoteStatus(behind: behind, upToDate: behind == 0);
+      // 反向走一遍：本地有而远端没有的提交数 > 0 说明历史已分叉
+      // （通常是远端改写了提交记录），此时 pull 必然无法 fast-forward
+      var diverged = false;
+      if (behind > 0) {
+        final ahead = RevWalk(r)
+          ..push(localOid)
+          ..hide(remoteOid);
+        diverged = ahead.walk(limit: 1).isNotEmpty;
+      }
+      return RemoteStatus(
+        behind: behind,
+        upToDate: behind == 0,
+        diverged: diverged,
+      );
     } finally {
       r.free();
     }
@@ -217,8 +230,9 @@ class GitSyncService {
         return const PullOutcome(PullResult.upToDate);
       }
       if (!results.contains(GitMergeAnalysis.fastForward)) {
-        throw SyncException(
+        throw const SyncException(
           '本地与远端已分叉，无法 fast-forward；请在电脑上手动处理',
+          diverged: true,
         );
       }
 
@@ -331,16 +345,27 @@ class RepoChange {
 
 /// 远端相对本地的状态（[behind] 上限 101，超过按 101 返回即可）。
 class RemoteStatus {
-  const RemoteStatus({required this.behind, required this.upToDate});
+  const RemoteStatus({
+    required this.behind,
+    required this.upToDate,
+    this.diverged = false,
+  });
 
   final int behind;
   final bool upToDate;
+
+  /// 本地有远端没有的提交 → 历史已分叉（远端可能改写了提交记录），
+  /// pull 无法 fast-forward，UI 应询问是否重新克隆。
+  final bool diverged;
 }
 
 class SyncException implements Exception {
-  const SyncException(this.message);
+  const SyncException(this.message, {this.diverged = false});
 
   final String message;
+
+  /// 本地与远端历史已分叉（远端可能改写了提交记录），只能重新克隆。
+  final bool diverged;
 
   @override
   String toString() => message;

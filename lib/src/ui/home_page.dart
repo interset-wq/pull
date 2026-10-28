@@ -868,7 +868,7 @@ class _HomePageState extends State<HomePage> {
     }
     final name = url.split('/').last.replaceAll('.git', '');
     final info = RepoInfo(
-      platform: _guessPlatform(url),
+      platform: guessPlatform(url),
       owner: url.split('/').reversed.elementAt(1),
       name: name,
       cloneUrl: url,
@@ -929,15 +929,16 @@ class _HomePageState extends State<HomePage> {
       if (mounted) setState(() => _cloning = false);
     }
   }
+}
 
-  GitPlatform _guessPlatform(String url) {
-    if (url.contains('github.com')) return GitPlatform.github;
-    if (url.contains('gitee.com')) return GitPlatform.gitee;
-    if (url.contains('atomgit.com')) return GitPlatform.atomgit;
-    // gitcode.com 是 AtomGit 历史域名，两者均广泛使用，分别保留各自平台
-    if (url.contains('gitcode.com')) return GitPlatform.gitcode;
-    return GitPlatform.gitcode;
-  }
+/// 按 URL 猜平台：识别不出时默认 GitCode（AtomGit，含历史域名）。
+GitPlatform guessPlatform(String url) {
+  if (url.contains('github.com')) return GitPlatform.github;
+  if (url.contains('gitee.com')) return GitPlatform.gitee;
+  if (url.contains('atomgit.com')) return GitPlatform.atomgit;
+  // gitcode.com 是 AtomGit 历史域名，两者均广泛使用，分别保留各自平台
+  if (url.contains('gitcode.com')) return GitPlatform.gitcode;
+  return GitPlatform.gitcode;
 }
 
 /// 空状态引导。
@@ -1381,6 +1382,11 @@ class _RepoPageState extends State<RepoPage> {
     if (!mounted) return;
     if (status.upToDate) {
       messenger.showSnackBar(const SnackBar(content: Text('已是最新')));
+      return;
+    }
+    if (status.diverged && mounted) {
+      // 远端改写了提交历史：pull 必然失败，直接询问是否重新克隆
+      await _offerReclone(behind: status.behind);
       return;
     }
     final go = await showDialog<bool>(
@@ -2052,11 +2058,114 @@ class _RepoPageState extends State<RepoPage> {
           ),
         );
       }
+    } on SyncException catch (e) {
+      if (!mounted) return;
+      if (e.diverged) {
+        // 远端改写了提交历史，本地永远无法 fast-forward：询问是否重新克隆
+        await _offerReclone();
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('同步失败: $e')));
+      }
     } on Exception catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('同步失败: $e')));
       }
+    }
+  }
+
+  /// 历史分叉时询问是否重新克隆：删除本地仓库后按 RepoMeta 记录的来源
+  /// 重新下载。阅读进度、收藏、更新标记都存在仓库外的 meta 里，不受影响。
+  Future<void> _offerReclone({int behind = 0}) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('远端提交历史已被改写'),
+        content: Text(
+          behind > 0
+              ? '远端重写了提交记录，本地无法直接更新（落后 $behind 个新提交）。'
+                  '重新克隆会删除本地仓库并重新下载全部内容；'
+                  '阅读进度与收藏会保留。'
+              : '远端重写了提交记录，本地无法直接更新。'
+                  '重新克隆会删除本地仓库并重新下载全部内容；'
+                  '阅读进度与收藏会保留。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('重新克隆'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) await _reclone();
+  }
+
+  /// 删除本地仓库目录并按原 URL 重新克隆（进度/收藏等元数据保留）。
+  Future<void> _reclone() async {
+    final meta = RepoMeta.read(widget.repoDir.path);
+    final url = meta?.url;
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('缺少仓库来源信息，请删除该仓库后重新添加'),
+        ),
+      );
+      return;
+    }
+    final name = widget.repoDir.path.split(Platform.pathSeparator).last;
+    var owner = '';
+    try {
+      final segments = Uri.parse(url).path.split('/')..removeWhere((s) => s.isEmpty);
+      if (segments.length >= 2) owner = segments[segments.length - 2];
+    } on Object {
+      // 解析失败时 owner 留空，仅影响展示
+    }
+    final info = RepoInfo(
+      platform: guessPlatform(url),
+      owner: owner,
+      name: name,
+      cloneUrl: url,
+      defaultBranch: meta?.branch ?? 'main',
+    );
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 24),
+            Expanded(child: Text('正在重新克隆仓库…')),
+          ],
+        ),
+      ),
+    );
+    try {
+      await GitSyncService().deleteRepo(widget.repoDir.path);
+      await GitSyncService().clone(
+        repo: info,
+        parentDir: widget.repoDir.parent,
+      );
+      RepoMeta.writeClone(
+        widget.repoDir.path,
+        url: url,
+        branch: info.defaultBranch,
+      );
+      await _refresh();
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('重新克隆失败: $e')));
+      }
+    } finally {
+      if (rootNav.canPop()) rootNav.pop();
     }
   }
 }

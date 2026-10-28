@@ -105,7 +105,10 @@ x86_64 模拟器无法安装本 APK，模拟器调试走 debug 构建。
 `v*` tag 触发 `.github/workflows/release.yml`，CI 校验 tag 与
 pubspec `version` 一致后自动构建 arm64 APK 并创建 Release，禁止手动
 上传 APK（避免与源码构建不一致）。发版流程 = 改 pubspec version →
-提交 → 打同名 tag 推送。
+提交 → 打同名 tag 推送。也可在 Actions → Release → Run workflow 手动跑
+一次（`workflow_dispatch`）：只做构建 + 签名校验的冒烟，**不创建 Release**
+（版本校验与发布步骤只对 tag 生效），用于验证 action / 构建环境升级后
+链路仍可用。
 
 ## 维护规则
 

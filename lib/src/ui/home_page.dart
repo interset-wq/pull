@@ -81,6 +81,16 @@ class _HomePageState extends State<HomePage> {
     }
     final dir = await LocalFolderService.mirrorDir(folder.name);
     if (!mounted) return;
+    // 增量同步会跳过「编辑器保存过但没写回源文件夹」的文件；这里明确
+    // 提示，避免用户以为源文件夹已经是最新
+    final pending = LocalFolderService.pendingCount(dir.path);
+    if (pending > 0) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('$pending 个修改尚未写回原文件夹（设置 → 未写回的修改）'),
+        ),
+      );
+    }
     Navigator.push(
       context,
       MaterialPageRoute<void>(
@@ -95,10 +105,12 @@ class _HomePageState extends State<HomePage> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await LocalFolderService.syncFolder(folder);
+      final dir = await LocalFolderService.mirrorDir(folder.name);
+      final pending = LocalFolderService.pendingCount(dir.path);
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('已刷新'),
-          duration: Duration(seconds: 1),
+        SnackBar(
+          content: Text(pending > 0 ? '已刷新；$pending 个修改尚未写回' : '已刷新'),
+          duration: const Duration(seconds: 2),
         ),
       );
     } on Object catch (e) {

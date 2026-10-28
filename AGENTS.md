@@ -21,18 +21,24 @@
   - **构建陷阱**：`INTERNET` 权限必须声明在 `android/app/src/main/AndroidManifest.xml`——Flutter 模板默认只加在 debug/profile 变体，release 包无网络权限，所有 HTTPS 请求报 `GIT_ERROR_NET: No address associated with hostname`。
 - **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
 - **本地文件夹阅读**（`lib/src/local/local_folder_service.dart`）：Android 走
-  `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→ 全量
-  **镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库同构，
-  不为 SAF 单独抽象内容源）；桌面走 `file_selector` 直选目录。镜像标记
-  `.pullread_local` 区分本地来源（「同步」= 重镜像）；只镜像 md/ipynb/代码/图片
-  （>32MB 跳过），重名文件夹自动加序号。`.txt` 同样进镜像，打开时路由到
+  `saf` 包授权文件夹（tree URI 持久化，无真实路径，dart:io 读不到）→
+  **增量镜像**到 `<docs>/local/<名>` 后复用 RepoPage/渲染管线（与 git 仓库
+  同构，不为 SAF 单独抽象内容源）；桌面走 `file_selector` 直选目录。镜像标记
+  `.pullread_local` 区分本地来源（「同步」= 增量重镜像）；只镜像
+  md/ipynb/代码/图片（>32MB 跳过），重名文件夹自动加序号。增量依据镜像根下
+  `.pullread_manifest.json` 的源侧 `(size, mtime)` 快照；SAF 授权必须申请
+  **写**权限（`pickDirectory(writePermission: true)`），否则编辑器无法写回。
+  `.txt` 同样进镜像，打开时路由到
   阅读页纯文本模式（`decodeTextBytes`：UTF-8 严格校验优先、GBK 回退，
   纯 Dart，`lib/src/utils/text_encoding.dart`）。
 - **本地 Markdown 编辑器**（`lib/src/ui/markdown_editor.dart`）：本地镜像 md
   的阅读页菜单「编辑」进入——源码 + 预览切换、手动保存 + 未保存离开提醒；
   保存双写镜像（dart:io）+ 原文件夹（Android SAF `writeFileBytes(overwrite:)`
   按相对路径逐段 `child()` 解析，桌面直写真实路径），保存返回阅读页自动
-  重载；仓库内文件只读，仍不做 git 提交。
+  重载；仓库内文件只读，仍不做 git 提交。写回失败时记入镜像根下
+  `.pullread_pending.json`（`.pullread_manifest.json` 旁）：之后的增量
+  同步会**跳过**这些文件并自动重试写回，绝不拿源侧旧内容覆盖镜像——
+  设置页「数据 → 未写回的修改」可查看明细、重试或以镜像为准强制覆盖。
 - **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）

@@ -49,3 +49,6 @@ app.*.map.json
 
 # project temp
 temp/
+
+# agent tooling state
+.atomcode/

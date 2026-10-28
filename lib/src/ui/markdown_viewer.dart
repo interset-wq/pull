@@ -188,6 +188,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _imageUrls = const [];
   String? _rawSource;
   bool _showRaw = false;
+  // Raw 模式多行选区（对标 GitHub mobile：长按起始行、点选结束行，
+  // 复制区间）；null = 未进入选区模式。anchor 为长按锚点，focus 为
+  // 后续点选的行，区间取两者较小/较大行号。
+  int? _rawAnchor;
+  int? _rawFocus;
   // 表格档位（按表存储）：key = 表格在文档中的序号（解析顺序，重建稳定），
   // value = 是否换行档。缺省 = 跟随设置页默认（wideTable 开 → 平铺；关 →
   // 测量驱动自动切档：该表自然宽度 > 2 倍屏宽时单独切为换行档）。
@@ -495,7 +500,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             onSelected: (v) {
               switch (v) {
                 case 'raw':
-                  setState(() => _showRaw = !_showRaw);
+                  setState(() {
+                    _showRaw = !_showRaw;
+                    _rawAnchor = null;
+                    _rawFocus = null;
+                  });
                 case 'font':
                   _showFontSheet();
                 case 'copy':
@@ -1594,19 +1603,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// Raw 视图文本：整段源码按当前代码字体渲染（无搜索高亮）。
-  TextSpan _rawSpans(ThemeData theme) {
-    final raw = _rawSource ?? '';
-    return TextSpan(
-      text: raw,
-      style: currentCodeFontStyle().copyWith(
-        fontSize: _fontSizes[_fontIndex],
-        height: 1.6,
-        color: theme.colorScheme.onSurface,
-      ),
-    );
-  }
-
   /// 链接点击：外部链接浏览器打开；#锚点页内跳转；
   /// 相对路径链接解析为仓库内文件（笔记进阅读页，其余进代码查看器）。
   Future<void> _onLinkTap(String href) async {
@@ -1815,9 +1811,23 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// Raw 模式：原始 Markdown 全文可选可复制（对标 GitHub mobile）。
+  /// Raw 模式：原始 Markdown 全文可复制（对标 GitHub mobile）。
+  /// 长按某行开始选区，再点另一行扩展区间（类 PC shift 选区），
+  /// 选区生效时顶部出现操作条可复制/取消。
   Widget _buildRawView(ThemeData theme) {
     final raw = _rawSource ?? '';
+    final lines = raw.split('\n');
+    final anchor = _rawAnchor;
+    final focus = _rawFocus;
+    final selStart =
+        anchor != null && focus != null ? (anchor < focus ? anchor : focus) : null;
+    final selEnd =
+        anchor != null && focus != null ? (anchor < focus ? focus : anchor) : null;
+    final lineStyle = currentCodeFontStyle().copyWith(
+      fontSize: _fontSizes[_fontIndex],
+      height: 1.6,
+      color: theme.colorScheme.onSurface,
+    );
     return Column(
       children: [
         Padding(
@@ -1837,24 +1847,96 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             ],
           ),
         ),
+        if (selStart != null)
+          Material(
+            color: theme.colorScheme.secondaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '已选 ${selStart + 1}–${selEnd! + 1} 行',
+                      style: currentCodeFontStyle().copyWith(
+                        fontSize: 13,
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '复制选中行',
+                    icon: const Icon(Icons.copy_all),
+                    color: theme.colorScheme.onSecondaryContainer,
+                    onPressed: () => _copyRawSelection(selStart, selEnd),
+                  ),
+                  IconButton(
+                    tooltip: '取消选区',
+                    icon: const Icon(Icons.close),
+                    color: theme.colorScheme.onSecondaryContainer,
+                    onPressed: _clearRawSelection,
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(
           child: Scrollbar(
             thumbVisibility: true,
             thickness: 4,
             radius: const Radius.circular(4),
             controller: _scrollController,
-            child: SingleChildScrollView(
+            child: ListView.builder(
               controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-              child: SelectableText.rich(
-                _rawSpans(theme),
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              itemCount: lines.length,
+              itemBuilder: (context, i) {
+                final selected =
+                    selStart != null && i >= selStart && i <= selEnd!;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onLongPress: () =>
+                      setState(() {
+                        _rawAnchor = i;
+                        _rawFocus = i;
+                      }),
+                  onTap: () {
+                    if (_rawAnchor == null) return;
+                    setState(() => _rawFocus = i);
+                  },
+                  child: Container(
+                    color: selected
+                        ? theme.colorScheme.primary.withValues(alpha: 0.18)
+                        : null,
+                    child: Text(lines[i], style: lineStyle),
+                  ),
+                );
+              },
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// 复制当前 Raw 选区（两行号含端点），完成后清空选区。
+  Future<void> _copyRawSelection(int start, int end) async {
+    final lines = (_rawSource ?? '').split('\n');
+    final text = lines.sublist(start, end + 1).join('\n');
+    await Clipboard.setData(ClipboardData(text: text));
+    _clearRawSelection();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已复制 ${start + 1}–${end + 1} 行')),
+      );
+    }
+  }
+
+  void _clearRawSelection() {
+    if (_rawAnchor == null && _rawFocus == null) return;
+    setState(() {
+      _rawAnchor = null;
+      _rawFocus = null;
+    });
   }
 
   /// markdown 文件所在目录，相对图片的解析基准。

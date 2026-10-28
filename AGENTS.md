@@ -28,6 +28,11 @@
   （>32MB 跳过），重名文件夹自动加序号。`.txt` 同样进镜像，打开时路由到
   阅读页纯文本模式（`decodeTextBytes`：UTF-8 严格校验优先、GBK 回退，
   纯 Dart，`lib/src/utils/text_encoding.dart`）。
+- **本地 Markdown 编辑器**（`lib/src/ui/markdown_editor.dart`）：本地镜像 md
+  的阅读页菜单「编辑」进入——源码 + 预览切换、手动保存 + 未保存离开提醒；
+  保存双写镜像（dart:io）+ 原文件夹（Android SAF `writeFileBytes(overwrite:)`
+  按相对路径逐段 `child()` 解析，桌面直写真实路径），保存返回阅读页自动
+  重载；仓库内文件只读，仍不做 git 提交。
 - **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）

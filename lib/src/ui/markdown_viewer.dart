@@ -20,6 +20,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../git/repo_meta.dart';
+import '../local/local_folder_service.dart';
 import '../notes/details_syntax.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
@@ -35,6 +36,7 @@ import 'code_font.dart';
 import 'h_scrollbar.dart';
 import 'home_page.dart';
 import 'image_gallery.dart';
+import 'markdown_editor.dart';
 import 'repo_image.dart';
 
 /// 笔记阅读页：Markdown 渲染 + 代码高亮 + 相对路径图片。
@@ -515,6 +517,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   _exportLongImage();
                 case 'shareCard':
                   _exportShareCard();
+                case 'edit':
+                  _openEditor();
               }
             },
             itemBuilder: (_) => [
@@ -531,6 +535,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 value: 'copyText',
                 child: Text('复制全文（纯文本）'),
               ),
+              // 编辑仅面向本地镜像 md（Roadmap 边界：仓库文件只读）
+              if (_isLocalMirrorMd)
+                const PopupMenuItem(value: 'edit', child: Text('编辑')),
               // raw 模式下没有渲染内容，长图/卡片无从生成
               if (!_showRaw) ...[
                 const PopupMenuItem(
@@ -631,6 +638,29 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已复制全文（Markdown）')));
+    }
+  }
+
+  /// 当前文章是否是本地镜像里的 md（编辑入口只对它开放）。
+  bool get _isLocalMirrorMd =>
+      widget.note.isMarkdown &&
+      LocalFolderService.isLocalMirror(widget.repoRoot);
+
+  /// 进编辑器；保存返回后重载正文，让修改立即反映在阅读页。
+  Future<void> _openEditor() async {
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => MarkdownEditorPage(
+          filePath: widget.note.absolutePath,
+          mirrorRoot: widget.repoRoot,
+          displayTitle: _title ?? widget.note.fileName,
+          relativePath: widget.note.relativePath,
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      setState(() => _content = _load());
     }
   }
 

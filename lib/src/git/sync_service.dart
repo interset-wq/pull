@@ -138,6 +138,49 @@ class GitSyncService {
   }
 
 
+  /// 远端状态：fetch 之后统计本地落后多少个提交，**不移动本地分支**。
+  ///
+  /// 供仓库页「检查更新」使用：先告诉用户有多少新内容，再决定是否 pull。
+  Future<RemoteStatus> checkRemote({required Directory repoDir}) {
+    final path = repoDir.path;
+    return Isolate.run(() {
+      try {
+        return _checkAt(path);
+      } catch (e) {
+        // 原生错误对象不能跨 isolate 发送，统一转普通异常
+        throw Exception('$e');
+      }
+    }).timeout(const Duration(minutes: 2));
+  }
+
+  static RemoteStatus _checkAt(String path) {
+    final r = Repository.open(path);
+    try {
+      final remote = Remote.lookup(repo: r, name: 'origin');
+      remote.fetch();
+      remote.free();
+      final branch = _currentBranch(r);
+      final remoteOid = Reference.nameToId(
+        repo: r,
+        refName: 'refs/remotes/origin/$branch',
+      );
+      final head = r.head;
+      final localOid = head.target;
+      head.free();
+      if (remoteOid.sha == localOid.sha) {
+        return const RemoteStatus(behind: 0, upToDate: true);
+      }
+      // 从远端头出发、排除本地头可达的提交 → 正是本地没有的新提交
+      final walker = RevWalk(r)
+        ..push(remoteOid)
+        ..hide(localOid);
+      final behind = walker.walk(limit: 101).length;
+      return RemoteStatus(behind: behind, upToDate: behind == 0);
+    } finally {
+      r.free();
+    }
+  }
+
   /// 拉取远端最新提交并 fast-forward 到本地分支（后台 isolate 执行）。
   ///
   /// 只处理 fast-forward 场景：本地有独立提交或产生冲突时抛出
@@ -226,6 +269,14 @@ class GitSyncService {
 }
 
 enum PullResult { upToDate, fastForwarded }
+
+/// 远端相对本地的状态（[behind] 上限 101，超过按 101 返回即可）。
+class RemoteStatus {
+  const RemoteStatus({required this.behind, required this.upToDate});
+
+  final int behind;
+  final bool upToDate;
+}
 
 class SyncException implements Exception {
   const SyncException(this.message);

@@ -63,6 +63,11 @@
 - **断链检查**（`lib/src/notes/link_check.dart`）：仓库页「更多 → 检查断链」
   批量校验相对链接/图片是否仍存在（跳过外部 URL/锚点/代码块，还原百分号
   编码与 `../`），结果按来源文件分组、可复制清单；纯只读，不修改仓库。
+- **同步可感知**：`GitSyncService.checkRemote()` 在 isolate 内 fetch 后用
+  `RevWalk(push 远端头, hide 本地头)` 统计落后提交数（不移动本地分支）；
+  仓库页「更多 → 检查更新」先展示数量再由用户决定是否 pull。`RepoMeta`
+  的 `syncedAt` 在克隆（`writeClone`）与成功 pull（`touchSynced`）时更新，
+  仓库卡展示「同步于 …」。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

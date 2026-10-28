@@ -457,6 +457,7 @@ class _HomePageState extends State<HomePage> {
                           name: name,
                           source: meta?.source,
                           lastOpened: meta?.lastOpened,
+                          syncedAt: meta?.syncedAt,
                           pinned: RepoMeta.isPinned(repo.path),
                           onTogglePin: () {
                             RepoMeta.togglePin(repo.path);
@@ -982,6 +983,17 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// 仓库卡片。
+/// 相对时间文案（仓库卡「同步于 …」）。
+String _relativeTime(DateTime time) {
+  final diff = DateTime.now().difference(time);
+  if (diff.inMinutes < 1) return '刚刚';
+  if (diff.inHours < 1) return '${diff.inMinutes} 分钟前';
+  if (diff.inDays < 1) return '${diff.inHours} 小时前';
+  if (diff.inDays < 30) return '${diff.inDays} 天前';
+  return '${time.year}-${time.month.toString().padLeft(2, '0')}-'
+      '${time.day.toString().padLeft(2, '0')}';
+}
+
 class _RepoCard extends StatelessWidget {
   const _RepoCard({
     required this.name,
@@ -991,6 +1003,7 @@ class _RepoCard extends StatelessWidget {
     required this.onTogglePin,
     this.source,
     this.lastOpened,
+    this.syncedAt,
   });
 
   final String name;
@@ -1006,6 +1019,9 @@ class _RepoCard extends StatelessWidget {
 
   /// 最近打开的文件（仓库相对路径），未记录时为 null。
   final String? lastOpened;
+
+  /// 最近一次成功同步时间，未记录时为 null。
+  final DateTime? syncedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -1050,6 +1066,17 @@ class _RepoCard extends StatelessWidget {
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
+                    ],
+                    if (syncedAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '同步于 ${_relativeTime(syncedAt!)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                     if (last != null) ...[
                       const SizedBox(height: 2),
@@ -1288,6 +1315,53 @@ class _RepoPageState extends State<RepoPage> {
     }
   }
 
+  /// 检查远端是否有新提交：先告知数量，再决定是否 pull（不改本地分支）。
+  Future<void> _checkUpdates() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('正在检查远端…'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    final RemoteStatus status;
+    try {
+      status = await GitSyncService().checkRemote(repoDir: widget.repoDir);
+    } on Object catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('检查失败：$e')));
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (status.upToDate) {
+      messenger.showSnackBar(const SnackBar(content: Text('已是最新')));
+      return;
+    }
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('发现更新'),
+        content: Text(
+          status.behind > 100
+              ? '远端有 100+ 个新提交，是否立即更新？'
+              : '远端有 ${status.behind} 个新提交，是否立即更新？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('立即更新'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) await _pull();
+  }
+
   /// 检查仓库内相对链接/图片是否仍然存在（只读，不改任何文件）。
   Future<void> _checkLinks() async {
     if (_linkChecking) return;
@@ -1439,10 +1513,20 @@ class _RepoPageState extends State<RepoPage> {
           PopupMenuButton<String>(
             tooltip: '更多',
             onSelected: (value) {
-              if (value == 'links') _checkLinks();
+              switch (value) {
+                case 'updates':
+                  _checkUpdates();
+                case 'links':
+                  _checkLinks();
+              }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'links', child: Text('检查断链')),
+            itemBuilder: (_) => [
+              if (!LocalFolderService.isLocalMirror(widget.repoDir.path))
+                const PopupMenuItem(
+                  value: 'updates',
+                  child: Text('检查更新'),
+                ),
+              const PopupMenuItem(value: 'links', child: Text('检查断链')),
             ],
           ),
         ],
@@ -1871,6 +1955,7 @@ class _RepoPageState extends State<RepoPage> {
       final result = await GitSyncService().pull(
         repoDir: widget.repoDir,
       );
+      RepoMeta.touchSynced(widget.repoDir.path);
       await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

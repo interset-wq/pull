@@ -41,6 +41,10 @@
   同步会**跳过**这些文件并自动重试写回，绝不拿源侧旧内容覆盖镜像——
   设置页「数据 → 未写回的修改」可查看明细、重试或以镜像为准强制覆盖。
 - **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
+- **目录扫描与缓存**（`lib/src/notes/note_index.dart`）：仓库文件列表在后台
+  isolate 扫描（UI 线程不做递归 `listSync`，大仓库不卡首帧），结果缓存到
+  `<reposRoot>/.meta/index/<仓库名>.json`；进入仓库页先用缓存渲染、再后台
+  重扫校正（stale-while-revalidate）。删除仓库/本地文件夹时一并清理该缓存。
 - **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:saf/saf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../git/repo_meta.dart';
 import 'mirror_state.dart';
@@ -142,6 +143,7 @@ class LocalFolderService {
       final mirror = await mirrorDir(folder.name);
       if (mirror.existsSync()) mirror.deleteSync(recursive: true);
       RepoMeta.remove(mirror.path);
+      NoteIndexCache.remove(mirror.path);
     } on Object {
       // 镜像清理失败无碍
     }

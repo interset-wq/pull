@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../git/repo_meta.dart';
 import '../git/sync_service.dart';
 import '../local/local_folder_service.dart';
+import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
 import '../platforms/git_platform.dart';
 import '../platforms/repo_info.dart';
@@ -597,6 +598,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await _sync.deleteRepo(repo.path);
       RepoMeta.remove(repo.path);
+      NoteIndexCache.remove(repo.path);
       await _loadRepos();
     } on Exception catch (e) {
       if (mounted) {
@@ -1044,6 +1046,8 @@ class _RepoPageState extends State<RepoPage> {
   }();
   List<NoteFile>? _allNotes;
   String _query = '';
+  bool _scanning = false;
+  int _scanSeq = 0;
 
   // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
   final Set<String> _expandedDirs = <String>{};
@@ -1056,11 +1060,31 @@ class _RepoPageState extends State<RepoPage> {
   @override
   void initState() {
     super.initState();
-    _allNotes = _scanner.scan(widget.repoDir.path);
+    // 先用磁盘缓存渲染首帧（大仓库不必等递归扫描），后台再重扫校正
+    _allNotes = NoteIndexCache.read(widget.repoDir.path);
+    _scanNotes();
   }
 
-  void _refresh() {
-    setState(() => _allNotes = _scanner.scan(widget.repoDir.path));
+  Future<void> _refresh() => _scanNotes();
+
+  /// 后台 isolate 扫描：UI 线程不做递归 listSync；更新的扫描会顶掉旧结果。
+  Future<void> _scanNotes() async {
+    final seq = ++_scanSeq;
+    if (mounted) setState(() => _scanning = true);
+    try {
+      final files = await scanNotesInBackground(
+        widget.repoDir.path,
+        useDefaults: _scanner.useDefaults,
+        customRules: _scanner.customRules,
+      );
+      if (!mounted || seq != _scanSeq) return;
+      setState(() => _allNotes = files);
+      await NoteIndexCache.write(widget.repoDir.path, files);
+    } on Object {
+      // 扫描失败保留缓存/旧列表，不打断阅读
+    } finally {
+      if (mounted && seq == _scanSeq) setState(() => _scanning = false);
+    }
   }
 
   /// 经典模式：当前目录下的子文件夹（应用 ignore 规则），排序后返回名称。
@@ -1203,13 +1227,19 @@ class _RepoPageState extends State<RepoPage> {
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
           ),
+          if (_scanning) const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _pull,
               child: isEmpty
-                  ? ListView(children: const [
-                      SizedBox(height: 120),
-                      Center(child: Text('这里没有文件')),
+                  ? ListView(children: [
+                      const SizedBox(height: 120),
+                      // 首次扫描（无缓存）时显示进度，而不是误报「这里没有文件」
+                      Center(
+                        child: _allNotes == null
+                            ? const CircularProgressIndicator()
+                            : const Text('这里没有文件'),
+                      ),
                     ])
                   : searching
                       // 搜索模式：扁平结果列表，显示相对路径
@@ -1473,7 +1503,7 @@ class _RepoPageState extends State<RepoPage> {
       }
       try {
         await LocalFolderService.syncFolder(folder);
-        _refresh();
+        await _refresh();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -1494,7 +1524,7 @@ class _RepoPageState extends State<RepoPage> {
       final result = await GitSyncService().pull(
         repoDir: widget.repoDir,
       );
-      _refresh();
+      await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

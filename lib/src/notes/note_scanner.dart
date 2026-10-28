@@ -8,7 +8,7 @@ class NoteScanner {
   /// 精确匹配，跨仓库生效；由调用方从设置传入。
   NoteScanner({this.useDefaults = true, this.customRules = const []});
 
-  /// 是否启用默认隐藏规则（点开头名 + [skipDirs]）。
+  /// 是否启用默认隐藏规则（点开头的文件/目录名）。
   /// `.git` 恒被跳过——关掉默认规则也不进 git 内部目录。
   final bool useDefaults;
   final List<String> customRules;
@@ -40,15 +40,13 @@ class NoteScanner {
   /// 未知类型的文本兜底大小上限：小文件按纯文本展示。
   static const unknownTextMaxBytes = 1 << 20; // 1 MB
 
-  static const skipDirs = {'.git', 'node_modules', '.obsidian', 'temp'};
-
   /// 名称是否被隐藏：自定义规则（精确名匹配，文件与目录都生效）优先；
-  /// 默认规则 = 点开头名 + skipDirs（.git 恒忽略）。
+  /// 默认规则 = 点开头的文件/目录名（.git 恒忽略）。
   bool isIgnored(String name) {
     if (name == '.git') return true;
     if (customRules.contains(name)) return true;
     if (!useDefaults) return false;
-    return name.startsWith('.') || skipDirs.contains(name);
+    return name.startsWith('.');
   }
 
   /// 递归列出仓库下所有可查看文件（相对仓库根的路径），

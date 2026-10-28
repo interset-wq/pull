@@ -343,8 +343,7 @@ class SettingsPage extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.visibility_off_outlined),
               title: const Text('隐藏默认忽略项'),
-              subtitle: const Text(
-                  '点开头的文件/目录、.git、node_modules、.obsidian、temp'),
+              subtitle: const Text('点开头的文件/目录（.git 恒忽略）'),
               value: prefs.ignoreDefaults,
               onChanged: prefs.setIgnoreDefaults,
             ),

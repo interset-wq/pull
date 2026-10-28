@@ -99,7 +99,7 @@ class AppPrefs extends ChangeNotifier {
   bool get wideTable => _wideTable ?? false;
 
   // Ignore 配置（Roadmap「设置增强·Ignore 配置」）：默认隐藏规则开关
-  // （.git/.gitignore/.github/node_modules/点开头名，见 NoteScanner）+
+  // （点开头的文件/目录名，.git 恒忽略，见 NoteScanner）+
   // 自定义文件/目录名规则（按名字精确匹配，跨仓库生效）
   bool? _ignoreDefaults;
   bool get ignoreDefaults => _ignoreDefaults ?? true;

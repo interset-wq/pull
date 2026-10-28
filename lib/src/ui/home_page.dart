@@ -1212,6 +1212,9 @@ class _RepoPageState extends State<RepoPage> {
   /// 断链检查进行中（只读检查，不修改仓库）。
   bool _linkChecking = false;
 
+  /// 文件排序：按名称（自然序，默认）或按修改时间（新的在前）。
+  bool _sortByModified = false;
+
   // 就地展开的目录（相对仓库根路径集合），会话内保持；默认全部折叠
   final Set<String> _expandedDirs = <String>{};
 
@@ -1404,6 +1407,13 @@ class _RepoPageState extends State<RepoPage> {
       ..sort(compareNatural);
   }
 
+  /// 文件排序：名称（自然序）或最近修改（新的在前）。
+  int _compareNotes(NoteFile a, NoteFile b) {
+    if (!_sortByModified) return compareNatural(a.fileName, b.fileName);
+    final byTime = b.modified.compareTo(a.modified);
+    return byTime != 0 ? byTime : compareNatural(a.fileName, b.fileName);
+  }
+
   /// 经典模式：当前目录下的 Markdown 笔记。
   List<NoteFile> _localNotes() {
     final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
@@ -1413,7 +1423,7 @@ class _RepoPageState extends State<RepoPage> {
             .substring(prefix.length)
             .contains('/'))
         .toList()
-      ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+      ..sort(_compareNotes);
   }
 
   /// 构建目录树条目：目录行就地展开/折叠（_expandedDirs 控制），
@@ -1444,7 +1454,7 @@ class _RepoPageState extends State<RepoPage> {
           .where((n) => n.relativePath.startsWith(prefix))
           .where((n) => !n.relativePath.substring(prefix.length).contains('/'))
           .toList()
-        ..sort((a, b) => compareNatural(a.fileName, b.fileName));
+        ..sort(_compareNotes);
 
       for (final name in dirs) {
         final rel = '$prefix$name';
@@ -1509,6 +1519,14 @@ class _RepoPageState extends State<RepoPage> {
             onPressed: _pull,
             icon: const Icon(Icons.sync),
             tooltip: '同步',
+          ),
+          IconButton(
+            tooltip: _sortByModified ? '按名称排序' : '按修改时间排序',
+            icon: Icon(
+              _sortByModified ? Icons.sort_by_alpha : Icons.schedule,
+            ),
+            onPressed: () =>
+                setState(() => _sortByModified = !_sortByModified),
           ),
           PopupMenuButton<String>(
             tooltip: '更多',

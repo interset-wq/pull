@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'sync_service.dart' show RepoChange;
+
 /// 仓库元数据（纯本地展示用）：克隆来源、分支、最近打开的文件。
 /// 存于 `<reposRoot>/.meta/<仓库名>.json` —— 刻意放在克隆仓库之外，
 /// 不污染只读仓库内容，pull 也不会触碰它。
@@ -29,6 +31,9 @@ class RepoMeta {
 
   /// 进度/收藏/历史条目数量上限，防止 meta 文件无限膨胀。
   static const _maxEntries = 50;
+
+  /// 最近更新标记的条目上限（超过整体清空）。
+  static const _maxRecentChanges = 200;
 
   static File _file(String repoRoot) {
     final name = repoRoot.split(Platform.pathSeparator).last;
@@ -121,6 +126,48 @@ class RepoMeta {
   static void touchSynced(String repoRoot) {
     final raw = _readRaw(repoRoot);
     raw['syncedAt'] = DateTime.now().toIso8601String();
+    _write(repoRoot, raw);
+  }
+
+  /// 记录 pull 带来的文件变更（「更新后的阅读感知」打标数据）。
+  /// 覆盖同名条目；超过 [_maxRecentChanges] 条时整体清空——打标只是
+  /// 提示，不是账本，与其算淘汰不如提示"这轮更新很多"。
+  static void setRecentChanges(
+    String repoRoot,
+    Iterable<RepoChange> changes,
+  ) {
+    final raw = _readRaw(repoRoot);
+    final map = <String, String>{
+      if (raw['recentChanges'] is Map)
+        for (final e in (raw['recentChanges'] as Map).entries)
+          if (e.key is String && e.value is String) e.key as String: e.value as String,
+    };
+    for (final c in changes) {
+      map[c.path] = c.added ? 'a' : 'm';
+    }
+    if (map.length > _maxRecentChanges) {
+      map.clear();
+    }
+    raw['recentChanges'] = map;
+    _write(repoRoot, raw);
+  }
+
+  /// 未读的更新标记：相对路径（`/` 分隔）→ 'a' 新增 / 'm' 修改。
+  static Map<String, String> readRecentChanges(String repoRoot) {
+    final raw = _readRaw(repoRoot)['recentChanges'];
+    if (raw is! Map) return const {};
+    return {
+      for (final e in raw.entries)
+        if (e.key is String && e.value is String) e.key as String: e.value as String,
+    };
+  }
+
+  /// 打开/阅读某文件后清除它的更新标记。
+  static void clearRecentChange(String repoRoot, String relativePath) {
+    final raw = _readRaw(repoRoot);
+    final map = raw['recentChanges'];
+    if (map is! Map || map.remove(relativePath) == null) return;
+    raw['recentChanges'] = map;
     _write(repoRoot, raw);
   }
 

@@ -73,7 +73,11 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   `RevWalk(push 远端头, hide 本地头)` 统计落后提交数（不移动本地分支）；
   仓库页「更多 → 检查更新」先展示数量再由用户决定是否 pull。`RepoMeta`
   的 `syncedAt` 在克隆（`writeClone`）与成功 pull（`touchSynced`）时更新，
-  仓库卡展示「同步于 …」。
+  仓库卡展示「同步于 …」。**更新感知打标**：pull（含「全部更新」与后台
+  静默拉取）fast-forward 后在 isolate 内对本地旧头→远端头做 tree diff，
+  变更文件（新增/修改，不含删除）记入 `RepoMeta.recentChanges`
+  （上限 200 条，超出整体清空）；仓库页文件行显示「新增/更新」角标，
+  打开文件即清除该文件的标记。
 - **阅读链路**（`lib/src/ui/markdown_viewer.dart`）：
   - **打开即续读**：首帧布局后自动恢复到上次位置（标题锚点优先，无标题按比例），
     SnackBar 提供「从头读」撤销；**不再弹模态框**（旧实现每次打开都问一次）

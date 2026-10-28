@@ -34,12 +34,12 @@ void main() {
     print('cloned to $path');
     expect(Directory(path).existsSync(), isTrue);
 
-    final result = await sync.pull(
+    final outcome = await sync.pull(
       repoDir: Directory(path),
     );
-    print('pull result: $result');
+    print('pull result: ${outcome.result}');
     expect(
-      result,
+      outcome.result,
       anyOf(equals(PullResult.upToDate), equals(PullResult.fastForwarded)),
     );
   }, timeout: const Timeout(Duration(minutes: 2)));

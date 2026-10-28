@@ -185,7 +185,9 @@ class GitSyncService {
   ///
   /// 只处理 fast-forward 场景：本地有独立提交或产生冲突时抛出
   /// [SyncException]，由上层 UI 决定如何提示——绝不做破坏性操作。
-  Future<PullResult> pull({required Directory repoDir}) {
+  /// 成功 fast-forward 时同时返回本次变更的文件清单（相对仓库根、
+  /// `/` 分隔），供「更新后的阅读感知」打标。
+  Future<PullOutcome> pull({required Directory repoDir}) {
     final path = repoDir.path;
     return Isolate.run(() {
       try {
@@ -196,7 +198,7 @@ class GitSyncService {
     }).timeout(const Duration(minutes: 5));
   }
 
-  static PullResult _pullAt(String path) {
+  static PullOutcome _pullAt(String path) {
     final r = Repository.open(path);
     try {
       final remote = Remote.lookup(repo: r, name: 'origin');
@@ -212,7 +214,7 @@ class GitSyncService {
       final analysis = Merge.analysis(repo: r, theirHead: remoteOid);
       final results = analysis.result;
       if (results.contains(GitMergeAnalysis.upToDate)) {
-        return PullResult.upToDate;
+        return const PullOutcome(PullResult.upToDate);
       }
       if (!results.contains(GitMergeAnalysis.fastForward)) {
         throw SyncException(
@@ -220,6 +222,9 @@ class GitSyncService {
         );
       }
 
+      final head = r.head;
+      final localOid = head.target;
+      head.free();
       final localRef = Reference.lookup(repo: r, name: 'refs/heads/$branch');
       Reference.setTarget(
         repo: r,
@@ -227,10 +232,46 @@ class GitSyncService {
         target: remoteOid,
       );
       _checkoutHead(r);
-      return PullResult.fastForwarded;
+      return PullOutcome(
+        PullResult.fastForwarded,
+        changes: _changedFiles(r, from: localOid, to: remoteOid),
+      );
     } finally {
       r.free();
     }
+  }
+
+  /// 两个提交间的文件变更清单（新增/修改，不含删除——删除的文件列表里
+  /// 本来就不会再出现）。isolate 内执行，返回纯数据可跨 isolate 传递。
+  static List<RepoChange> _changedFiles(
+    Repository r, {
+    required Oid from,
+    required Oid to,
+  }) {
+    final changes = <RepoChange>[];
+    try {
+      final oldCommit = Commit.lookup(repo: r, oid: from);
+      final newCommit = Commit.lookup(repo: r, oid: to);
+      final diff = Diff.treeToTree(
+        repo: r,
+        oldTree: oldCommit.tree,
+        newTree: newCommit.tree,
+      );
+      for (final delta in diff.deltas) {
+        final path = delta.newFile.path;
+        if (path.isEmpty) continue;
+        changes.add(
+          RepoChange(
+            path: path.replaceAll('\\', '/'),
+            added: delta.status == GitDelta.added,
+          ),
+        );
+      }
+      diff.free();
+    } on Object {
+      // 变更清单只用于展示打标，算不出来时静默跳过，不影响 pull 本身
+    }
+    return changes;
   }
 
   static String _currentBranch(Repository r) {
@@ -269,6 +310,24 @@ class GitSyncService {
 }
 
 enum PullResult { upToDate, fastForwarded }
+
+/// pull 的完整结果：结果类型 + fast-forward 时本次变更的文件清单。
+class PullOutcome {
+  const PullOutcome(this.result, {this.changes = const <RepoChange>[]});
+
+  final PullResult result;
+
+  /// 本次 pull 新增/修改的文件（相对仓库根，`/` 分隔）；仅展示用。
+  final List<RepoChange> changes;
+}
+
+/// 一条文件变更：[added] 为 true 表示新文件，否则为修改。
+class RepoChange {
+  const RepoChange({required this.path, required this.added});
+
+  final String path;
+  final bool added;
+}
 
 /// 远端相对本地的状态（[behind] 上限 101，超过按 101 返回即可）。
 class RemoteStatus {

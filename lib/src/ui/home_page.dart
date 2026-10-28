@@ -161,7 +161,10 @@ class _HomePageState extends State<HomePage> {
     final sync = GitSyncService();
     for (final repo in repos) {
       try {
-        await sync.pull(repoDir: repo);
+        final outcome = await sync.pull(repoDir: repo);
+        if (outcome.result != PullResult.upToDate) {
+          RepoMeta.setRecentChanges(repo.path, outcome.changes);
+        }
       } on Exception {
         // 静默失败：离线时保持本地内容可用
       }
@@ -746,8 +749,8 @@ class _HomePageState extends State<HomePage> {
       final sync = GitSyncService();
       for (final repo in repos) {
         try {
-          final result = await sync.pull(repoDir: repo);
-          if (result != PullResult.upToDate) updated++;
+          final outcome = await sync.pull(repoDir: repo);
+          if (outcome.result != PullResult.upToDate) updated++;
         } on Exception {
           failed++;
         }
@@ -1202,6 +1205,37 @@ class _RepoPageState extends State<RepoPage> {
   bool _scanning = false;
   int _scanSeq = 0;
 
+  /// 上次 pull 之后新增/修改且尚未打开过的文件（path → 'a'/'m'）。
+  Map<String, String> _recentChanges = const {};
+
+  /// 文件行尾部的「新增/更新」标记（pull 后未打开过的文件）。
+  Widget? _recentChangeBadge(String relativePath, ThemeData theme) {
+    final kind = _recentChanges[relativePath];
+    if (kind == null) return null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withAlpha(30),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        kind == 'a' ? '新增' : '更新',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.primary,
+        ),
+      ),
+    );
+  }
+
+  /// 打开文件时清除它的更新标记（阅读过即不再提示）。
+  void _markOpened(NoteFile note) {
+    if (!_recentChanges.containsKey(note.relativePath)) return;
+    RepoMeta.clearRecentChange(widget.repoDir.path, note.relativePath);
+    setState(() {
+      _recentChanges = Map.of(_recentChanges)..remove(note.relativePath);
+    });
+  }
+
   // 正文搜索（全文）：文件名搜索是同步过滤，正文搜索走后台 isolate + 防抖
   bool _contentMode = false;
   Timer? _searchDebounce;
@@ -1228,7 +1262,15 @@ class _RepoPageState extends State<RepoPage> {
     super.initState();
     // 先用磁盘缓存渲染首帧（大仓库不必等递归扫描），后台再重扫校正
     _allNotes = NoteIndexCache.read(widget.repoDir.path);
+    _loadRecentChanges();
     _scanNotes();
+  }
+
+  /// 上次 pull 之后新增/修改且尚未打开过的文件（path → 'a'/'m'）。
+  void _loadRecentChanges() {
+    setState(() {
+      _recentChanges = RepoMeta.readRecentChanges(widget.repoDir.path);
+    });
   }
 
   Future<void> _refresh() => _scanNotes();
@@ -1638,6 +1680,10 @@ class _RepoPageState extends State<RepoPage> {
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
+                                trailing: _recentChangeBadge(
+                                  note.relativePath,
+                                  theme,
+                                ),
                                 onTap: () => _openFile(note),
                               ),
                           ],
@@ -1733,6 +1779,10 @@ class _RepoPageState extends State<RepoPage> {
                                         overflow: TextOverflow.ellipsis,
                                         style: theme.textTheme.bodyMedium,
                                       ),
+                                      trailing: _recentChangeBadge(
+                                        entry.note!.relativePath,
+                                        theme,
+                                      ),
                                       onTap: () => _openFile(entry.note!),
                                     ),
                               ],
@@ -1792,6 +1842,10 @@ class _RepoPageState extends State<RepoPage> {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.bodyMedium,
+                                    ),
+                                    trailing: _recentChangeBadge(
+                                      note.relativePath,
+                                      theme,
                                     ),
                                     onTap: () => _openFile(note),
                                   ),
@@ -1907,6 +1961,7 @@ class _RepoPageState extends State<RepoPage> {
 
   void _openFile(NoteFile note, {String? findQuery}) {
     RepoMeta.touchLastOpened(widget.repoDir.path, note.relativePath);
+    _markOpened(note);
     if (note.isMarkdown || note.isPlainText) {
       Navigator.push(
         context,
@@ -1975,15 +2030,24 @@ class _RepoPageState extends State<RepoPage> {
       return;
     }
     try {
-      final result = await GitSyncService().pull(
+      final outcome = await GitSyncService().pull(
         repoDir: widget.repoDir,
       );
       RepoMeta.touchSynced(widget.repoDir.path);
+      if (outcome.result != PullResult.upToDate) {
+        // 记录本次 pull 带来的新增/修改，供列表打标（打开文件后清除）
+        RepoMeta.setRecentChanges(widget.repoDir.path, outcome.changes);
+        _loadRecentChanges();
+      }
       await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result == PullResult.upToDate ? '已是最新' : '已更新'),
+            content: Text(
+              outcome.result == PullResult.upToDate
+                  ? '已是最新'
+                  : '已更新（${outcome.changes.length} 个文件）',
+            ),
             duration: const Duration(seconds: 1),
           ),
         );

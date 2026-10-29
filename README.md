@@ -10,7 +10,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-Android-4c8f56)](#-下载)
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Release](https://img.shields.io/badge/release-v1.11.0-f5b301)](https://github.com/interset-wq/pullread/releases)
+[![Release](https://img.shields.io/badge/release-v1.11.1-f5b301)](https://github.com/interset-wq/pullread/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>

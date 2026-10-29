@@ -17,6 +17,7 @@ import '../search/repo_search.dart';
 import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import '../utils/dir_size.dart' show formatBytes;
+import 'bookmarks_page.dart';
 import 'global_search_page.dart';
 import 'markdown_viewer.dart';
 import 'open_note.dart';
@@ -45,6 +46,10 @@ class _HomePageState extends State<HomePage> {
   /// 各仓库/镜像里尚未读的「新增/更新」条目总数（更新收件箱的角标）。
   int _updateCount = 0;
 
+  /// 最近书签（首页横滑条，最多 5 条，跨仓库）。
+  List<({String repoName, Directory root, Bookmark bookmark})>
+      _recentBookmarks = const [];
+
   Future<Directory> get _reposRoot async {
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory('${docs.path}${Platform.pathSeparator}repos');
@@ -65,6 +70,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() => _localFolders = folders);
     unawaited(_refreshUpdateCount());
+    unawaited(_loadBookmarks());
   }
 
   /// 重新统计更新收件箱的未读数（仓库 + 本地镜像的 recentChanges）。
@@ -103,6 +109,81 @@ class _HomePageState extends State<HomePage> {
     );
     if (!mounted) return;
     await _refreshUpdateCount();
+  }
+
+  /// 收集跨仓库/本地镜像的书签，首页只展示最近 5 条。
+  Future<void> _loadBookmarks() async {
+    final out = <({String repoName, Directory root, Bookmark bookmark})>[];
+    for (final dir in _repos ?? const <Directory>[]) {
+      final name = dir.path.split(Platform.pathSeparator).last;
+      for (final bookmark in RepoMeta.readBookmarks(dir.path)) {
+        out.add((repoName: name, root: dir, bookmark: bookmark));
+      }
+    }
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      final dir = await LocalFolderService.mirrorDir(folder.name);
+      for (final bookmark in RepoMeta.readBookmarks(dir.path)) {
+        out.add((repoName: folder.name, root: dir, bookmark: bookmark));
+      }
+    }
+    out.sort((a, b) => b.bookmark.createdAt.compareTo(a.bookmark.createdAt));
+    if (!mounted) return;
+    setState(() => _recentBookmarks = out.take(5).toList());
+  }
+
+  Future<void> _openBookmark(
+    ({String repoName, Directory root, Bookmark bookmark}) entry,
+  ) async {
+    final bookmark = entry.bookmark;
+    final file = File(
+      '${entry.root.path}${Platform.pathSeparator}'
+      '${bookmark.relativePath.replaceAll('/', Platform.pathSeparator)}',
+    );
+    if (!file.existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('文件已不存在；书签可在书签页删除')),
+      );
+      return;
+    }
+    final stat = file.statSync();
+    await openNoteFile(
+      context,
+      repoRoot: entry.root.path,
+      note: NoteFile(
+        relativePath: bookmark.relativePath,
+        absolutePath: file.path,
+        modified: stat.modified,
+        sizeBytes: stat.size,
+      ),
+      initialFraction: bookmark.fraction,
+    );
+    if (!mounted) return;
+    await _loadBookmarks();
+  }
+
+  /// 全部书签页（跨仓库）。
+  Future<void> _openBookmarks() async {
+    final sources = <BookmarkSource>[];
+    for (final dir in _repos ?? const <Directory>[]) {
+      sources.add(BookmarkSource(
+        name: dir.path.split(Platform.pathSeparator).last,
+        root: dir,
+      ));
+    }
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      sources.add(BookmarkSource(
+        name: folder.name,
+        root: await LocalFolderService.mirrorDir(folder.name),
+      ));
+    }
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => BookmarksPage(sources: sources)),
+    );
+    if (!mounted) return;
+    await _loadBookmarks();
   }
 
   /// 添加本地文件夹（系统选择器授权 + 首次镜像）。
@@ -253,6 +334,7 @@ class _HomePageState extends State<HomePage> {
     });
     setState(() => _repos = dirs);
     unawaited(_refreshUpdateCount());
+    unawaited(_loadBookmarks());
   }
 
   @override
@@ -420,6 +502,10 @@ class _HomePageState extends State<HomePage> {
                                 files: _collectRecents(repos),
                                 starred: false,
                               ),
+                              if (_recentBookmarks.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                _buildBookmarkStrip(theme),
+                              ],
                               const SizedBox(height: 16),
                               if (locals.isEmpty)
                                 // 空态：一张添加入口卡（避免孤立标题悬在仓库卡上方）
@@ -601,6 +687,92 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// 首页书签条：最近 5 条书签，点卡片直达，「全部」进跨仓库书签页。
+  Widget _buildBookmarkStrip(ThemeData theme) {
+    if (_recentBookmarks.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('书签', style: theme.textTheme.titleMedium),
+            ),
+            TextButton(
+              onPressed: _openBookmarks,
+              child: const Text('全部'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: 76,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _recentBookmarks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final entry = _recentBookmarks[i];
+              final fileName = entry.bookmark.relativePath.split('/').last;
+              return Material(
+                color: theme.colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _openBookmark(entry),
+                  child: Container(
+                    width: 210,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.bookmark_outline,
+                          size: 22,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                entry.bookmark.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '$fileName · '
+                                '${(entry.bookmark.fraction * 100).round()}%',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color:
+                                      theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 

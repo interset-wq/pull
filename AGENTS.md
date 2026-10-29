@@ -102,9 +102,10 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   - **打开即续读**：首帧布局后自动恢复到上次位置（标题锚点优先，无标题按比例），
     SnackBar 提供「从头读」撤销；**不再弹模态框**（旧实现每次打开都问一次）
   - **进度只在用户滚动时写**：续读恢复用 `animateTo` / `scrollToIndex`，同样会触发
-    `ScrollController` 的 listener；保存前必须确认 `position.activity` 是
-    `DragScrollActivity` / `BallisticScrollActivity`，否则打开后立刻返回会把进度
-    覆盖成动画中途的位置（实测 87% 被写成 55%）。
+    `ScrollController` 的 listener；保存前必须确认这轮滚动由用户发起
+    （`ScrollStartNotification.dragDetails != null`，`ScrollEndNotification` 复位），
+    否则打开后立刻返回会把进度覆盖成动画中途的位置（实测 87% 被写成 55%）。
+  - **段落级书签**：阅读页菜单「在此处加书签」记录章节标题 + 全篇滚动比例，存 `RepoMeta.bookmarks`（单仓库 100 条、同文件 1% 内去重）；本文书签面板可跳转/删除。首页「书签」横滑条展示最近 5 条，`BookmarksPage` 按仓库分组列出全部；点开走 `MarkdownViewerPage.initialFraction`（优先级低于 `initialFindQuery`，且会跳过续读恢复）直接落到位置。
   - **同目录上一篇/下一篇**复用 `NoteIndexCache`，打开文章时**不做**递归扫描；
     缓存缺失才后台扫描并回写（大仓库打开文章不卡首帧）
   - **正文图片解码宽度**按「屏宽 × devicePixelRatio」限制（320~2048），避免

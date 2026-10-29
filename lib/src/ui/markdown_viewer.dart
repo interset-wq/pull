@@ -48,6 +48,7 @@ class MarkdownViewerPage extends StatefulWidget {
     required this.note,
     required this.repoRoot,
     this.initialFindQuery,
+    this.initialFraction,
     super.key,
   });
 
@@ -57,6 +58,10 @@ class MarkdownViewerPage extends StatefulWidget {
   /// 从正文搜索结果进入时携带的检索词：加载完成后自动打开查找条并
   /// 定位到第一处命中（否则用户得自己再滚到命中位置）。
   final String? initialFindQuery;
+
+  /// 从书签进入时携带的全篇滚动比例（0~1）：加载后直接落到该位置，
+  /// 优先级低于 [initialFindQuery]。与续读恢复互斥。
+  final double? initialFraction;
 
   /// 匹配 <img src="...">（属性顺序任意、单双引号均可、含尾部其余属性）。
   static final RegExp _htmlImgRegExp = RegExp(
@@ -187,6 +192,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   List<String> _tags = const [];
   List<TocEntry> _toc = const [];
 
+  /// 本仓库全部书签（含其他文章）；本文书签用 [_noteBookmarks] 过滤。
+  List<Bookmark> _bookmarks = const [];
+
   /// 剩余阅读时间（分钟，_load 时估算一次）。
   int _readingMinutes = 0;
 
@@ -300,6 +308,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     _loadSiblings();
     _content = _load();
     _starred = RepoMeta.isStarred(widget.repoRoot, widget.note.relativePath);
+    _bookmarks = RepoMeta.readBookmarks(widget.repoRoot);
     _scrollController.addListener(_onScroll);
     // 音量键翻页：全局 handler，页面销毁即注销，其他页面不受影响
     HardwareKeyboard.instance.addHandler(_handleVolumeKey);
@@ -493,6 +502,13 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
         if (_findMatches.isNotEmpty) _jumpToMatch(0);
       });
+    } else if (widget.initialFraction != null) {
+      // 从书签进入：跳过续读，加载后直接落到书签位置
+      _restorePending = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _jumpToFractionWhenReady(widget.initialFraction!);
+      });
     }
 
     _imageUrls = MarkdownViewerPage.collectImageUrls(body);
@@ -593,6 +609,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   });
                 case 'font':
                   _showFontSheet();
+                case 'bookmark':
+                  _addBookmark();
+                case 'bookmarks':
+                  _showBookmarksSheet();
                 case 'copy':
                   _copyFullText();
                 case 'copyText':
@@ -611,6 +631,16 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                 child: Text(_showRaw ? '渲染视图' : 'Raw 模式'),
               ),
               const PopupMenuItem(value: 'font', child: Text('字号')),
+              if (!_showRaw) ...[
+                const PopupMenuItem(
+                  value: 'bookmark',
+                  child: Text('在此处加书签'),
+                ),
+                PopupMenuItem(
+                  value: 'bookmarks',
+                  child: Text('书签（${_noteBookmarks.length}）'),
+                ),
+              ],
               const PopupMenuItem(
                 value: 'copy',
                 child: Text('复制全文（Markdown）'),
@@ -1957,6 +1987,145 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         );
       }),
     );
+  }
+
+  // ---- 段落级书签 ----
+
+  /// 本文的书签（按创建时间倒序，来自 [_bookmarks]）。
+  List<Bookmark> get _noteBookmarks => [
+        for (final b in _bookmarks)
+          if (b.relativePath == widget.note.relativePath) b,
+      ];
+
+  /// 在当前阅读位置加一条书签：标题取所在章节（无标题用文件名），
+  /// 位置存全篇滚动比例。
+  void _addBookmark() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final max = position.maxScrollExtent;
+    if (max <= 0) return;
+    final heading = _lastHeadingIndex >= 0 && _lastHeadingIndex < _toc.length
+        ? _lastHeadingIndex
+        : null;
+    final bookmark = Bookmark(
+      relativePath: widget.note.relativePath,
+      fraction: (_scrollController.offset / max).clamp(0.0, 1.0),
+      title: heading != null
+          ? _toc[heading].text
+          : (_title ?? widget.note.fileName),
+      headingIndex: heading,
+      createdAt: DateTime.now(),
+    );
+    RepoMeta.addBookmark(widget.repoRoot, bookmark);
+    setState(() => _bookmarks = RepoMeta.readBookmarks(widget.repoRoot));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已加书签：${bookmark.title}'),
+          duration: const Duration(seconds: 2),
+          persist: false,
+          action: SnackBarAction(
+            label: '查看',
+            onPressed: _showBookmarksSheet,
+          ),
+        ),
+      );
+  }
+
+  /// 本文书签列表：点一条跳过去，右侧删除。
+  void _showBookmarksSheet() {
+    var list = _noteBookmarks;
+    if (list.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('本文还没有书签：菜单「在此处加书签」可以记下当前位置'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final bookmark in list)
+                ListTile(
+                  leading: const Icon(Icons.bookmark_outline),
+                  title: Text(
+                    bookmark.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${(bookmark.fraction * 100).round()}% · '
+                    '${_formatBookmarkTime(bookmark.createdAt)}',
+                  ),
+                  trailing: IconButton(
+                    tooltip: '删除书签',
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    onPressed: () {
+                      RepoMeta.removeBookmark(widget.repoRoot, bookmark);
+                      final fresh = RepoMeta.readBookmarks(widget.repoRoot);
+                      setSheetState(() {
+                        list = [
+                          for (final b in fresh)
+                            if (b.relativePath == widget.note.relativePath) b,
+                        ];
+                      });
+                      setState(() => _bookmarks = fresh);
+                      if (list.isEmpty && sheetContext.mounted) {
+                        Navigator.pop(sheetContext);
+                      }
+                    },
+                  ),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _jumpToFraction(bookmark.fraction);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 按全篇比例跳转（书签与 initialFraction 共用）。
+  void _jumpToFraction(double fraction) {
+    if (!_scrollController.hasClients) return;
+    final max = _scrollController.position.maxScrollExtent;
+    if (max <= 0) return;
+    _scrollController.animateTo(
+      (fraction.clamp(0.0, 1.0) * max),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// 懒渲染下首帧的 maxScrollExtent 可能还没算好：等几帧再跳。
+  void _jumpToFractionWhenReady(double fraction, [int attempt = 0]) {
+    if (!mounted) return;
+    if (!_scrollController.hasClients ||
+        _scrollController.position.maxScrollExtent <= 0) {
+      if (attempt < 8) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _jumpToFractionWhenReady(fraction, attempt + 1),
+        );
+      }
+      return;
+    }
+    _jumpToFraction(fraction);
+  }
+
+  static String _formatBookmarkTime(DateTime time) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(time.month)}-${two(time.day)} '
+        '${two(time.hour)}:${two(time.minute)}';
   }
 
   // ---- 文内查找（Roadmap「检索·文内查找」） ----

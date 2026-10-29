@@ -15,6 +15,7 @@ Future<void> openNoteFile(
   required String repoRoot,
   required NoteFile note,
   String? findQuery,
+  double? initialFraction,
 }) {
   RepoMeta.touchLastOpened(repoRoot, note.relativePath);
   RepoMeta.clearRecentChange(repoRoot, note.relativePath);
@@ -26,6 +27,7 @@ Future<void> openNoteFile(
           note: note,
           repoRoot: repoRoot,
           initialFindQuery: findQuery,
+          initialFraction: initialFraction,
         ),
       ),
     );

@@ -31,19 +31,18 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
   git2dart: ^0.5.6
   http: ^1.6.0
   markdown_widget: ^2.3.2+8
   path_provider: ^2.1.6
   flutter_highlight: ^0.7.0
   scroll_to_index: ^3.0.1
-  flutter_svg: ^2.3.0
+  flutter_svg: ^2.3.2
   archive: ^4.5.2
   git2dart_binaries: 1.14.0
   url_launcher: ^6.3.3
+  # 刻意锁在 2.3.2（classic channel）：2.5.x 的 Pigeon/JNI 实现在部分设备上
+  # getAll 不返回、启动卡死，见提交 c659292；升级前必须先做真机验证。
   shared_preferences: 2.3.2
   shared_preferences_android: 2.3.2
   flutter_math_fork: ^0.7.4

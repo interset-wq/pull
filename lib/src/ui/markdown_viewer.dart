@@ -329,6 +329,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     super.dispose();
   }
 
+  /// 当前这轮滚动是否由用户发起（拖动或拖动后的惯性）。
+  /// 续读恢复 / TOC 跳转都是程序化动画，不能把它们的中间位置写成进度。
+  bool _userScrollActive = false;
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     // 顶部细进度条：按滚动比例实时更新
@@ -342,12 +346,17 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _updateCurrentSection();
     }
     // 进度：询问一次是否跳回（不强转）；之后按 800ms 节流保存比例位置
-    final max = _scrollController.position.maxScrollExtent;
+    final position = _scrollController.position;
+    final max = position.maxScrollExtent;
     if (_restorePending) {
       _maybeRestoreProgress();
       return;
     }
-    if (max > 0 &&
+    // 只在用户真正拖动 / 惯性滚动时保存：续读恢复用的是 animateTo /
+    // scrollToIndex，也会触发 listener——若一并保存，打开后立刻返回会把
+    // 进度覆盖成动画中途的位置（实测 87% 被写成 55%）。
+    if (_userScrollActive &&
+        max > 0 &&
         now.difference(_lastProgressSave) >= const Duration(milliseconds: 800)) {
       _lastProgressSave = now;
       RepoMeta.saveProgressInfo(
@@ -1594,7 +1603,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       const SizedBox(height: 90),
     ];
     final margin = AppPrefs.instance?.pageMargin ?? 16;
-    return GestureDetector(
+    return NotificationListener<ScrollNotification>(
+      // 拖动开始（dragDetails 非空）→ 用户滚动；结束通知覆盖惯性滚动收尾。
+      // 程序化 animateTo / scrollToIndex 的 start 通知没有 dragDetails，
+      // 因此不会被当成用户阅读进度。
+      onNotification: (notification) {
+        if (notification is ScrollStartNotification &&
+            notification.dragDetails != null) {
+          _userScrollActive = true;
+        } else if (notification is ScrollEndNotification) {
+          _userScrollActive = false;
+        }
+        return false;
+      },
+      child: GestureDetector(
       // 手势翻页默认关闭（设置页可开）：横滑易与代码块/表格的横向滚动混淆
       onHorizontalDragEnd:
           (AppPrefs.instance?.swipePaging ?? false) ? _openSiblingByDrag : null,
@@ -1669,6 +1691,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
                   ),
                 ],
               ),
+        ),
       ),
     );
   }

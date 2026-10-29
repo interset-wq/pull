@@ -101,6 +101,10 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
 - **阅读链路**（`lib/src/ui/markdown_viewer.dart`）：
   - **打开即续读**：首帧布局后自动恢复到上次位置（标题锚点优先，无标题按比例），
     SnackBar 提供「从头读」撤销；**不再弹模态框**（旧实现每次打开都问一次）
+  - **进度只在用户滚动时写**：续读恢复用 `animateTo` / `scrollToIndex`，同样会触发
+    `ScrollController` 的 listener；保存前必须确认 `position.activity` 是
+    `DragScrollActivity` / `BallisticScrollActivity`，否则打开后立刻返回会把进度
+    覆盖成动画中途的位置（实测 87% 被写成 55%）。
   - **同目录上一篇/下一篇**复用 `NoteIndexCache`，打开文章时**不做**递归扫描；
     缓存缺失才后台扫描并回写（大仓库打开文章不卡首帧）
   - **正文图片解码宽度**按「屏宽 × devicePixelRatio」限制（320~2048），避免

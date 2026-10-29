@@ -213,6 +213,9 @@ class _MarkdownEditorPageState extends State<MarkdownEditorPage> {
                   expands: true,
                   textAlignVertical: TextAlignVertical.top,
                   keyboardType: TextInputType.multiline,
+                  // 脏状态驱动保存按钮颜色、「未保存」圆点与 PopScope.canPop：
+                  // 不监听的话编辑后离开不会弹提醒（canPop 仍是旧值）
+                  onChanged: (_) => setState(() {}),
                   style: currentCodeFontStyle().copyWith(
                     fontSize: 14,
                     height: AppPrefs.instance?.lineHeight ?? 1.75,

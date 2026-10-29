@@ -17,7 +17,7 @@
   通道缺失的平台上 `setAppIcon` 仅持久化偏好、静默忽略。
 - **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证。
   - **Android 硬约束**：git2dart 静态链接的 OpenSSL 无法访问系统证书库，`main()` 必须在 `runApp` 前依次执行 `WidgetsFlutterBinding.ensureInitialized()` → `Libgit2.version`（初始化 libgit2）→ `AndroidSSLHelper.initialize()` → `Libgit2.setSSLCertLocations(file:)`，否则 HTTPS 克隆报 "the SSL certificate is invalid"（CA 证书包随 git2dart_binaries 打包，无需自备）。
-  - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。pull 用 `Isolate.run`；**clone 用 `Isolate.spawn` + `ReceivePort`**，超时 5 分钟时 `Isolate.kill` 并清理目标目录——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。clone 支持**进度与取消**：isolate 内 `Callbacks.transferProgress` 把对象数/字节经 port 回传（`[0, received, total, bytes]` 消息），UI 显示百分比与已下载体积；`CloneCancelToken.cancel()` 在下一条进度消息时生效（传输是阻塞原生调用，无法即时打断），取消路径复用 kill + 清理目录的 finally 逻辑。
+  - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。**clone 与 pull 都用 `Isolate.spawn` + `ReceivePort`**（checkRemote 仍用 `Isolate.run`，不需要进度）；**clone 超时 5 分钟时 `Isolate.kill` 并清理目标目录**——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。clone 支持**进度与取消**：isolate 内 `Callbacks.transferProgress` 把对象数/字节经 port 回传（`[0, received, total, bytes]` 消息），UI 显示百分比与已下载体积；`CloneCancelToken.cancel()` 在下一条进度消息时生效（传输是阻塞原生调用，无法即时打断），取消路径复用 kill + 清理目录的 finally 逻辑。
   - **构建陷阱**：`INTERNET` 权限必须声明在 `android/app/src/main/AndroidManifest.xml`——Flutter 模板默认只加在 debug/profile 变体，release 包无网络权限，所有 HTTPS 请求报 `GIT_ERROR_NET: No address associated with hostname`。
   - **dev 启动与图标 alias**：正式包把启动入口放在 `activity-alias`（桌面图标五选一），而 Flutter 工具只认 `<activity>` 上的 MAIN/LAUNCHER，`flutter run` / `flutter drive` 会报 `package identifier or launch activity not found`。因此 `android/app/src/debug/AndroidManifest.xml` 与 `src/profile/AndroidManifest.xml` 各有一份覆盖清单：给 `MainActivity` 挂启动 intent-filter、移除五个 alias。release 不读这两个目录，**图标切换只能在 release 包上验收**；改图标相关逻辑时不要动这两份清单。
 - **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
@@ -95,6 +95,9 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   变更文件（新增/修改，不含删除）记入 `RepoMeta.recentChanges`
   （上限 200 条，超出整体清空）；仓库页文件行显示「新增/更新」角标，
   打开文件即清除该文件的标记。
+  - **拉取进度**：`pull()` 用 `Isolate.spawn` + `ReceivePort`（与 clone 同一套消息协议：进度 / 结果 / 错误），isolate 内 `Remote.fetch(transferProgress:)` 回报对象数与字节。拉取**不可安全取消**（fetch 是阻塞原生调用，kill 可能留下半截 packfile），所以只显示进度、不提供取消。仓库页「同步」与「全部更新」都走 `runWithPullProgress` 对话框；批量路径同时补写 `syncedAt` 与 `recentChanges`（早期只有单仓库 pull 写）。
+  - **更新收件箱**（`lib/src/ui/updates_page.dart`）：首页 AppBar 的 inbox 图标带未读数，跨仓库与本地镜像聚合 `recentChanges`、按来源分组；点开即读并清除该条，支持「全部已读」。打开文件的统一入口是 `lib/src/ui/open_note.dart`（阅读页/图库/代码页三路分发 + 清除标记 + 最近打开），仓库页与收件箱共用。
+  - **仓库页阅读状态**：文件行尾部显示「读到 N% / 已读完」（<0.5% 不标），工具栏「仅看未读」只隐藏**有阅读记录**的文件；数据由 `RepoMeta.readAllProgress` 一次读出，从阅读页返回后刷新。
 - **阅读链路**（`lib/src/ui/markdown_viewer.dart`）：
   - **打开即续读**：首帧布局后自动恢复到上次位置（标题锚点优先，无标题按比例），
     SnackBar 提供「从头读」撤销；**不再弹模态框**（旧实现每次打开都问一次）

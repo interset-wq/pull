@@ -17,13 +17,14 @@ import '../search/repo_search.dart';
 import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
 import '../utils/dir_size.dart' show formatBytes;
-import 'code_viewer.dart';
 import 'global_search_page.dart';
-import 'image_gallery.dart';
 import 'markdown_viewer.dart';
+import 'open_note.dart';
+import 'pull_progress.dart';
 import 'search_snippet_text.dart';
 import 'settings_page.dart';
 import 'tag_page.dart';
+import 'updates_page.dart';
 
 /// 首页：已克隆仓库卡片 + 添加仓库（克隆）。
 /// 移动端优先：大卡片、下拉刷新、底部导航结构。
@@ -40,6 +41,9 @@ class _HomePageState extends State<HomePage> {
   List<LocalFolder>? _localFolders;
   bool _cloning = false;
   bool _updatingAll = false;
+
+  /// 各仓库/镜像里尚未读的「新增/更新」条目总数（更新收件箱的角标）。
+  int _updateCount = 0;
 
   Future<Directory> get _reposRoot async {
     final docs = await getApplicationDocumentsDirectory();
@@ -60,6 +64,45 @@ class _HomePageState extends State<HomePage> {
     final folders = await LocalFolderService.listFolders();
     if (!mounted) return;
     setState(() => _localFolders = folders);
+    unawaited(_refreshUpdateCount());
+  }
+
+  /// 重新统计更新收件箱的未读数（仓库 + 本地镜像的 recentChanges）。
+  Future<void> _refreshUpdateCount() async {
+    var total = 0;
+    for (final dir in _repos ?? const <Directory>[]) {
+      total += RepoMeta.readRecentChanges(dir.path).length;
+    }
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      final dir = await LocalFolderService.mirrorDir(folder.name);
+      total += RepoMeta.readRecentChanges(dir.path).length;
+    }
+    if (!mounted || total == _updateCount) return;
+    setState(() => _updateCount = total);
+  }
+
+  /// 打开更新收件箱：一次性汇总所有来源的未读更新。
+  Future<void> _openUpdates() async {
+    final sources = <({String name, Directory root})>[];
+    for (final dir in _repos ?? const <Directory>[]) {
+      sources.add((
+        name: dir.path.split(Platform.pathSeparator).last,
+        root: dir,
+      ));
+    }
+    for (final folder in _localFolders ?? const <LocalFolder>[]) {
+      sources.add((
+        name: folder.name,
+        root: await LocalFolderService.mirrorDir(folder.name),
+      ));
+    }
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => UpdatesPage(sources: sources)),
+    );
+    if (!mounted) return;
+    await _refreshUpdateCount();
   }
 
   /// 添加本地文件夹（系统选择器授权 + 首次镜像）。
@@ -163,6 +206,7 @@ class _HomePageState extends State<HomePage> {
     for (final repo in repos) {
       try {
         final outcome = await sync.pull(repoDir: repo);
+        RepoMeta.touchSynced(repo.path);
         if (outcome.result != PullResult.upToDate) {
           RepoMeta.setRecentChanges(repo.path, outcome.changes);
         }
@@ -208,6 +252,7 @@ class _HomePageState extends State<HomePage> {
       return pa.compareTo(pb);
     });
     setState(() => _repos = dirs);
+    unawaited(_refreshUpdateCount());
   }
 
   @override
@@ -255,6 +300,15 @@ class _HomePageState extends State<HomePage> {
                 : const Icon(Icons.cloud_sync_outlined),
             onPressed:
                 (_cloning || _updatingAll || _repos == null) ? null : _pullAll,
+          ),
+          IconButton(
+            tooltip: '更新收件箱',
+            icon: Badge(
+              isLabelVisible: _updateCount > 0,
+              label: Text(_updateCount > 99 ? '99+' : '$_updateCount'),
+              child: const Icon(Icons.inbox_outlined),
+            ),
+            onPressed: (repos.isEmpty && locals.isEmpty) ? null : _openUpdates,
           ),
           if (AppPrefs.instance case final prefs?) ...[
             IconButton(
@@ -696,14 +750,17 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _openRepo(Directory repoDir) {
-    Navigator.push(
+  Future<void> _openRepo(Directory repoDir) async {
+    await Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
         builder: (_) => RepoPage(repoDir: repoDir),
         settings: const RouteSettings(name: 'repo-root'),
       ),
     );
+    if (!mounted) return;
+    // 仓库页里打开文件会清掉更新标记、拉取会新增标记
+    await _refreshUpdateCount();
   }
 
   Future<void> _confirmDelete(Directory repo) async {
@@ -746,16 +803,33 @@ class _HomePageState extends State<HomePage> {
     setState(() => _updatingAll = true);
     var updated = 0;
     var failed = 0;
+    final sync = GitSyncService();
     try {
-      final sync = GitSyncService();
-      for (final repo in repos) {
-        try {
-          final outcome = await sync.pull(repoDir: repo);
-          if (outcome.result != PullResult.upToDate) updated++;
-        } on Exception {
-          failed++;
-        }
-      }
+      await runWithPullProgress<void>(
+        context,
+        title: '正在更新全部仓库',
+        action: (onProgress) async {
+          for (var i = 0; i < repos.length; i++) {
+            final repo = repos[i];
+            final name = repo.path.split(Platform.pathSeparator).last;
+            final label = '(${i + 1}/${repos.length}) $name';
+            onProgress(label, null);
+            try {
+              final outcome = await sync.pull(
+                repoDir: repo,
+                onProgress: (p) => onProgress(label, p),
+              );
+              RepoMeta.touchSynced(repo.path);
+              if (outcome.result != PullResult.upToDate) {
+                RepoMeta.setRecentChanges(repo.path, outcome.changes);
+                updated++;
+              }
+            } on Exception {
+              failed++;
+            }
+          }
+        },
+      );
       await _loadRepos();
     } finally {
       if (mounted) {
@@ -1269,6 +1343,12 @@ class _RepoPageState extends State<RepoPage> {
   /// 上次 pull 之后新增/修改且尚未打开过的文件（path → 'a'/'m'）。
   Map<String, String> _recentChanges = const {};
 
+  /// 阅读进度（相对路径 → 0~1），仓库页展示「读到 N% / 已读完」。
+  Map<String, double> _progress = const {};
+
+  /// 仅显示没有阅读记录的文件（有进度就算读过）。
+  bool _unreadOnly = false;
+
   /// 文件行尾部的「新增/更新」标记（pull 后未打开过的文件）。
   Widget? _recentChangeBadge(String relativePath, ThemeData theme) {
     final kind = _recentChanges[relativePath];
@@ -1295,6 +1375,34 @@ class _RepoPageState extends State<RepoPage> {
     setState(() {
       _recentChanges = Map.of(_recentChanges)..remove(note.relativePath);
     });
+  }
+
+  /// 文件行尾部：更新角标 + 阅读状态。
+  /// 未读不单独标注（否则每行都是「未读」），用「仅看未读」筛选表达。
+  Widget? _fileTrailing(NoteFile note, ThemeData theme) {
+    final badge = _recentChangeBadge(note.relativePath, theme);
+    final progress = _progress[note.relativePath];
+    String? label;
+    if (progress != null && progress > 0.005) {
+      label = progress >= 0.98
+          ? '已读完'
+          : '读到 ${(progress * 100).round()}%';
+    }
+    if (badge == null && label == null) return null;
+    final children = <Widget>[];
+    if (badge != null) children.add(badge);
+    if (label != null) {
+      if (badge != null) children.add(const SizedBox(width: 6));
+      children.add(
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: children);
   }
 
   // 正文搜索（全文）：文件名搜索是同步过滤，正文搜索走后台 isolate + 防抖
@@ -1324,6 +1432,7 @@ class _RepoPageState extends State<RepoPage> {
     // 先用磁盘缓存渲染首帧（大仓库不必等递归扫描），后台再重扫校正
     _allNotes = NoteIndexCache.read(widget.repoDir.path);
     _loadRecentChanges();
+    _progress = RepoMeta.readAllProgress(widget.repoDir.path);
     _scanNotes();
   }
 
@@ -1522,6 +1631,11 @@ class _RepoPageState extends State<RepoPage> {
     return byTime != 0 ? byTime : compareNatural(a.fileName, b.fileName);
   }
 
+  /// 「仅看未读」只藏掉**有阅读记录**的文件：读到一半的也算读过，
+  /// 不然筛选结果和「未读」的字面意思对不上。
+  bool _hiddenByUnreadFilter(NoteFile note) =>
+      _unreadOnly && _progress.containsKey(note.relativePath);
+
   /// 经典模式：当前目录下的 Markdown 笔记。
   List<NoteFile> _localNotes() {
     final prefix = widget.subPath.isEmpty ? '' : '${widget.subPath}/';
@@ -1530,6 +1644,7 @@ class _RepoPageState extends State<RepoPage> {
         .where((n) => !n.relativePath
             .substring(prefix.length)
             .contains('/'))
+        .where((n) => !_hiddenByUnreadFilter(n))
         .toList()
       ..sort(_compareNotes);
   }
@@ -1561,6 +1676,7 @@ class _RepoPageState extends State<RepoPage> {
       final files = allNotes
           .where((n) => n.relativePath.startsWith(prefix))
           .where((n) => !n.relativePath.substring(prefix.length).contains('/'))
+          .where((n) => !_hiddenByUnreadFilter(n))
           .toList()
         ..sort(_compareNotes);
 
@@ -1635,6 +1751,14 @@ class _RepoPageState extends State<RepoPage> {
             ),
             onPressed: () =>
                 setState(() => _sortByModified = !_sortByModified),
+          ),
+          IconButton(
+            tooltip: _unreadOnly ? '显示全部文件' : '仅看未读',
+            icon: Icon(
+              _unreadOnly ? Icons.filter_alt : Icons.filter_alt_outlined,
+            ),
+            color: _unreadOnly ? theme.colorScheme.primary : null,
+            onPressed: () => setState(() => _unreadOnly = !_unreadOnly),
           ),
           PopupMenuButton<String>(
             tooltip: '更多',
@@ -1746,10 +1870,7 @@ class _RepoPageState extends State<RepoPage> {
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                trailing: _recentChangeBadge(
-                                  note.relativePath,
-                                  theme,
-                                ),
+                                trailing: _fileTrailing(note, theme),
                                 onTap: () => _openFile(note),
                               ),
                           ],
@@ -1845,10 +1966,7 @@ class _RepoPageState extends State<RepoPage> {
                                         overflow: TextOverflow.ellipsis,
                                         style: theme.textTheme.bodyMedium,
                                       ),
-                                      trailing: _recentChangeBadge(
-                                        entry.note!.relativePath,
-                                        theme,
-                                      ),
+                                      trailing: _fileTrailing(entry.note!, theme),
                                       onTap: () => _openFile(entry.note!),
                                     ),
                               ],
@@ -1909,10 +2027,7 @@ class _RepoPageState extends State<RepoPage> {
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.bodyMedium,
                                     ),
-                                    trailing: _recentChangeBadge(
-                                      note.relativePath,
-                                      theme,
-                                    ),
+                                    trailing: _fileTrailing(note, theme),
                                     onTap: () => _openFile(note),
                                   ),
                               ],
@@ -2026,40 +2141,21 @@ class _RepoPageState extends State<RepoPage> {
   }
 
   void _openFile(NoteFile note, {String? findQuery}) {
-    RepoMeta.touchLastOpened(widget.repoDir.path, note.relativePath);
     _markOpened(note);
-    if (note.isMarkdown || note.isPlainText) {
-      Navigator.push(
+    unawaited(
+      openNoteFile(
         context,
-        MaterialPageRoute<void>(
-          builder: (_) => MarkdownViewerPage(
-            note: note,
-            repoRoot: widget.repoDir.path,
-            initialFindQuery: findQuery,
-          ),
-        ),
-      );
-    } else if (note.isImage) {
-      Navigator.push(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => ImageGalleryPage(
-            sources: [note.absolutePath],
-            baseDir: widget.repoDir.path,
-          ),
-        ),
-      );
-    } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => CodeViewerPage(
-            path: note.absolutePath,
-            fileName: note.fileName + note.extension,
-          ),
-        ),
-      );
-    }
+        repoRoot: widget.repoDir.path,
+        note: note,
+        findQuery: findQuery,
+      ).then((_) {
+        // 从阅读页回来：刷新阅读状态（读到 N% / 已读完）
+        if (!mounted) return;
+        setState(() {
+          _progress = RepoMeta.readAllProgress(widget.repoDir.path);
+        });
+      }),
+    );
   }
 
   Future<void> _pull() async {
@@ -2096,8 +2192,16 @@ class _RepoPageState extends State<RepoPage> {
       return;
     }
     try {
-      final outcome = await GitSyncService().pull(
-        repoDir: widget.repoDir,
+      final outcome = await runWithPullProgress<PullOutcome>(
+        context,
+        title: '正在拉取',
+        action: (onProgress) => GitSyncService().pull(
+          repoDir: widget.repoDir,
+          onProgress: (p) => onProgress(
+            widget.repoDir.path.split(Platform.pathSeparator).last,
+            p,
+          ),
+        ),
       );
       RepoMeta.touchSynced(widget.repoDir.path);
       if (outcome.result != PullResult.upToDate) {

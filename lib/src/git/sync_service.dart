@@ -285,22 +285,89 @@ class GitSyncService {
   /// [SyncException]，由上层 UI 决定如何提示——绝不做破坏性操作。
   /// 成功 fast-forward 时同时返回本次变更的文件清单（相对仓库根、
   /// `/` 分隔），供「更新后的阅读感知」打标。
-  Future<PullOutcome> pull({required Directory repoDir}) {
+  /// [onProgress] 在对象传输阶段回调（对象数/已传输字节）；拉取不可安全
+  /// 取消（fetch 是阻塞原生调用，kill 可能留下半截 packfile），所以只做进度。
+  Future<PullOutcome> pull({
+    required Directory repoDir,
+    void Function(CloneProgress progress)? onProgress,
+  }) async {
     final path = repoDir.path;
-    return Isolate.run(() {
-      try {
-        return _pullAt(path);
-      } catch (e) {
-        throw Exception('$e');
+    final port = ReceivePort();
+    await Isolate.spawn(_pullEntry, <Object?>[path, port.sendPort]);
+    try {
+      // 消息协议：进度 [0, received, total, bytes]；
+      // 成功 [1, 'ff'|'same', [[路径, 新增?], …]]；
+      // 失败 [2, 文案, 是否分叉]
+      await for (final msg in port.timeout(const Duration(minutes: 5))) {
+        if (msg is! List || msg.isEmpty) continue;
+        switch (msg[0]) {
+          case 0:
+            onProgress?.call(
+              CloneProgress(
+                receivedObjects: msg[1] as int,
+                totalObjects: msg[2] as int,
+                receivedBytes: msg[3] as int,
+              ),
+            );
+          case 1:
+            final rawChanges = (msg[2] as List?) ?? const [];
+            return PullOutcome(
+              msg[1] == 'ff' ? PullResult.fastForwarded : PullResult.upToDate,
+              changes: [
+                for (final c in rawChanges)
+                  RepoChange(
+                    path: (c as List)[0] as String,
+                    added: c[1] as bool,
+                  ),
+              ],
+            );
+          case 2:
+            throw SyncException(msg[1] as String, diverged: msg[2] == true);
+        }
       }
-    }).timeout(const Duration(minutes: 5));
+      throw const SyncException('拉取失败：连接中断');
+    } on TimeoutException {
+      throw const SyncException('拉取超时（5 分钟）：网络过慢或仓库过大，请重试');
+    } finally {
+      port.close();
+      // 超时/异常不 kill：打断正在写的 packfile 风险大于收益，
+      // 让 isolate 自然结束（与改造前 Isolate.run().timeout() 的行为一致）
+    }
   }
 
-  static PullOutcome _pullAt(String path) {
+  static void _pullEntry(List<Object?> args) {
+    final path = args[0] as String;
+    final send = args[1] as SendPort;
+    try {
+      final outcome = _pullAt(path, send);
+      send.send(<Object?>[
+        1,
+        outcome.result == PullResult.fastForwarded ? 'ff' : 'same',
+        [
+          for (final c in outcome.changes) [c.path, c.added],
+        ],
+      ]);
+    } on SyncException catch (e) {
+      send.send(<Object?>[2, e.message, e.diverged]);
+    } on Object catch (e) {
+      send.send(<Object?>[2, '$e', false]);
+    }
+  }
+
+  static PullOutcome _pullAt(String path, SendPort progress) {
     final r = Repository.open(path);
     try {
       final remote = Remote.lookup(repo: r, name: 'origin');
-      remote.fetch();
+      remote.fetch(
+        callbacks: Callbacks(
+          transferProgress: (stats) => progress.send(<Object?>[
+            0,
+            stats.receivedObjects,
+            stats.totalObjects,
+            stats.receivedBytes,
+          ]),
+        ),
+      );
       remote.free();
 
       final branch = _currentBranch(r);
@@ -410,7 +477,7 @@ class GitSyncService {
 
 enum PullResult { upToDate, fastForwarded }
 
-/// 克隆传输进度：对象传输阶段（packfile 下载/索引）的快照。
+/// 对象传输进度（clone / pull 共用）：packfile 下载/索引阶段的快照。
 class CloneProgress {
   const CloneProgress({
     required this.receivedObjects,

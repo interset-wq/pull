@@ -171,6 +171,13 @@ class RepoMeta {
     _write(repoRoot, raw);
   }
 
+  /// 一次清空本仓库的全部更新标记（更新收件箱的「全部已读」）。
+  static void clearRecentChanges(String repoRoot) {
+    final raw = _readRaw(repoRoot);
+    if (raw.remove('recentChanges') == null) return;
+    _write(repoRoot, raw);
+  }
+
   /// 读取文章的已保存进度，返回 (比例 0~1, 最近标题索引)。
   /// 兼容旧数据：只存了比例（num）时标题索引为 null。
   static (double, int?) readProgressInfo(
@@ -212,6 +219,26 @@ class RepoMeta {
   static double? readProgress(String repoRoot, String relativePath) {
     final (f, _) = readProgressInfo(repoRoot, relativePath);
     return f > 0 ? f : null;
+  }
+
+  /// 全部有阅读记录的文件：相对路径 → 0~1。仓库页用它展示阅读状态。
+  static Map<String, double> readAllProgress(String repoRoot) {
+    final map = _readRaw(repoRoot)['progress'];
+    if (map is! Map) return const {};
+    final out = <String, double>{};
+    for (final entry in map.entries) {
+      final key = entry.key;
+      if (key is! String) continue;
+      final value = entry.value;
+      if (value is num) {
+        out[key.replaceAll('\\', '/')] =
+            value.clamp(0.0, 1.0).toDouble();
+      } else if (value is Map && value['f'] is num) {
+        out[key.replaceAll('\\', '/')] =
+            (value['f'] as num).clamp(0.0, 1.0).toDouble();
+      }
+    }
+    return out;
   }
 
   /// 文章是否已收藏。

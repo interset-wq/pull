@@ -59,6 +59,10 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # 真机性能基线（integration_test/render_perf_test.dart）：需要真实引擎与
+  # profile 模式才能拿到可信的帧耗时，flutter test 的 debug 环境量不准。
+  integration_test:
+    sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

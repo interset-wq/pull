@@ -229,6 +229,11 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 当前所在章节（TOC 高亮），-1 表示尚未定位。
   final _currentSection = ValueNotifier<int>(-1);
   final List<GlobalKey> _headingKeys = [];
+
+  /// 每个 TOC 标题在懒列表里的条目位置（`_buildBodyBlocks` 时填充），
+  /// 供 scroll_to_index 跳到尚未构建的章节。
+  final Map<int, int> _headingSlots = <int, int>{};
+
   final GlobalKey _viewportKey = GlobalKey();
 
   /// 长图导出的重绘边界（Roadmap「导出与分享·导出长图」）：包裹正文内容
@@ -236,6 +241,10 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 布局整篇，边界离屏图层即完整长文，滚动位置不影响截取。
   final GlobalKey _bodyCaptureKey = GlobalKey();
   bool _exportingImage = false;
+
+  /// 导出长图期间切回整篇一次性布局：懒列表只构建视口附近的块，
+  /// RepaintBoundary 截不到还没构建的部分。
+  bool _eagerForCapture = false;
 
   /// 导出长图期间的强制展开信号（Roadmap「导出与分享·导出长图」）：
   /// 截图截的是当前视图状态，折叠代码/折叠块若保持收起，长图里就是缺失的；
@@ -300,11 +309,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         // 平台通道不可用（如测试环境）时忽略，不影响阅读
       });
     }
-    AppPrefs.loadFontIndex().then((i) {
-      if (mounted && i >= 0 && i < _fontSizes.length) {
-        setState(() => _fontIndex = i);
-      }
-    });
   }
 
   bool _starred = false;
@@ -373,17 +377,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 并给一个「从头读」的撤销入口。
   void _restoreProgress(double saved, int? headingIdx) {
     if (!mounted || !_scrollController.hasClients) return;
-    final headingCtx = (headingIdx != null &&
-            headingIdx >= 0 &&
-            headingIdx < _headingKeys.length)
-        ? _headingKeys[headingIdx].currentContext
-        : null;
-    if (headingCtx != null) {
-      Scrollable.ensureVisible(
-        headingCtx,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+    final hasHeading = headingIdx != null &&
+        headingIdx >= 0 &&
+        headingIdx < _headingKeys.length;
+    if (hasHeading) {
+      // 懒渲染下目标标题可能还没构建，_jumpToHeadingTop 会走 scroll_to_index
+      _jumpToHeadingTop(headingIdx);
     } else {
       final max = _scrollController.position.maxScrollExtent;
       _scrollController.animateTo(
@@ -407,6 +406,8 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   /// 当前章节 = 最后一个已进入视口顶部的标题。
+  /// 懒渲染下只检查已构建的标题（未构建的都在视口外）；附近一个都没
+  /// 构建时保持上一次的章节，避免长章节里高亮闪没。
   void _updateCurrentSection() {
     if (_headingKeys.isEmpty || !_scrollController.hasClients) return;
     final viewport = _viewportKey.currentContext?.findRenderObject();
@@ -421,13 +422,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         current = i;
       }
     }
+    if (current < 0) return;
     if (current != _currentSection.value) {
       _currentSection.value = current;
-      if (current >= 0) _lastHeadingIndex = current;
+      _lastHeadingIndex = current;
     }
   }
 
   Future<String> _load() async {
+    // 字号先读出来再返回正文：否则字体设置的回调会在正文构建后再触发
+    // 一次整篇重建（长文等于白做一次解析 + 布局）
+    final savedFont = await AppPrefs.loadFontIndex();
+    if (savedFont >= 0 && savedFont < _fontSizes.length) {
+      _fontIndex = savedFont;
+    }
     // TXT 可能是 GBK/GB2312 编码，统一走字节解码（UTF-8 优先，GBK 兜底）
     var raw =
         decodeTextBytes(await File(widget.note.absolutePath).readAsBytes());
@@ -767,19 +775,25 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   /// 产物同时存入系统相册「PullRead」（保存失败不阻断分享）。
   Future<void> _exportLongImage() async {
     if (_exportingImage) return;
-    final boundary = _bodyCaptureKey.currentContext?.findRenderObject();
-    if (boundary is! RenderRepaintBoundary) return;
     setState(() => _exportingImage = true);
     final messenger = ScaffoldMessenger.of(context);
     // dpr 在首个 await 前采集：避免跨 async gap 使用 context
     final dpr = MediaQuery.of(context).devicePixelRatio;
     ui.Image? image;
     try {
-      // 强制展开全部折叠区，等两帧让重排（含表格/mermaid 重测量）完成：
-      // 第一帧应用展开，第二帧确保整体布局落定，再取最终高度
+      // 懒渲染下整篇还没构建：先切回一次性布局，同时强制展开全部折叠区。
+      // 等三帧让重排（含表格/mermaid 重测量）落定，再取最终高度
       _forceExpand.value = true;
+      if (mounted) {
+        setState(() => _eagerForCapture = true);
+      }
       await WidgetsBinding.instance.endOfFrame;
       await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _bodyCaptureKey.currentContext?.findRenderObject();
+      if (boundary is! RenderRepaintBoundary) {
+        throw Exception('正文尚未完成布局');
+      }
       // GPU 纹理高度上限（保守值）：超高长图先预降采样，否则 toImage
       // 直接失败或产出被裁剪的坏图
       const maxTexture = 16384.0;
@@ -812,6 +826,9 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       if (bytes == null) throw Exception('PNG 编码失败');
       // 尽快还原视图状态，再走保存/分享的慢 IO
       _forceExpand.value = false;
+      if (mounted) {
+        setState(() => _eagerForCapture = false);
+      }
       await WidgetsBinding.instance.endOfFrame;
       await _savePngAndShare(
         bytes.buffer.asUint8List(),
@@ -823,7 +840,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     } finally {
       // 兜底还原：任何提前 return/异常路径都不得把页面留在强制展开态
       _forceExpand.value = false;
-      if (mounted) setState(() => _exportingImage = false);
+      if (mounted) {
+        setState(() {
+          _eagerForCapture = false;
+          _exportingImage = false;
+        });
+      }
     }
   }
 
@@ -1408,10 +1430,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  /// 正文渲染：按 GFM 告警块分割，告警渲染为彩色提示框；
-  /// 标题挂 AutoScrollTag 供目录锚点跳转（目录列表由 _load 的 extractToc 提供，
-  /// 两者均按文档顺序生成，索引一一对应）。
-  Widget _renderBody(
+  /// 正文块渲染：按 GFM 告警块分割，告警渲染为彩色提示框。
+  ///
+  /// 返回按文档顺序排好的块列表（面包屑 + 各段落/告警块），懒渲染与整篇
+  /// 导出共用同一份结构，避免两条路径的排版分叉；标题在这里记下自己在
+  /// 列表里的槽位（`_headingSlots`），供目录跳转到尚未构建的章节。
+  List<Widget> _buildBodyBlocks(
     String content,
     ThemeData theme,
     MarkdownConfig config,
@@ -1420,6 +1444,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     // 文档的表格在重建间拿到稳定索引（_tableWrapOverrides 的 key）。
     _tableSeq = 0;
     _detailsSeq = 0;
+    _headingSlots.clear();
     final generator = MarkdownGenerator(
       inlineSyntaxList: [MathInlineSyntax(), MathBlockSyntax()],
       // markdown 包把 <details> 当原始 HTML 文本（不产出元素），自定义
@@ -1532,14 +1557,12 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
             if (idx >= 0 &&
                 idx < widgets.length &&
                 anchorIndex < _headingKeys.length) {
-              widgets[idx] = AutoScrollTag(
-                key: ValueKey('toc-$anchorIndex'),
-                index: anchorIndex,
-                controller: _scrollController,
-                child: _HeadingMarker(
-                  key: _headingKeys[anchorIndex],
-                  child: widgets[idx],
-                ),
+              // 懒渲染下只有视口附近的块会被构建；这里记下标题在整
+              // 列表里的位置，供 scroll_to_index 跳到未构建的章节。
+              _headingSlots[anchorIndex] = children.length + idx;
+              widgets[idx] = _HeadingMarker(
+                key: _headingKeys[anchorIndex],
+                child: widgets[idx],
               );
             }
             anchorIndex++;
@@ -1549,6 +1572,20 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
           children.add(_alertBox(type, body, theme, config, generator));
       }
     }
+    return children;
+  }
+
+  /// 正文宿主。默认走懒渲染：只有视口附近的块会被构建/布局，
+  /// 长文首帧与内存开销只和屏高有关（1.1 实测：5000 行整篇布局 2.0s、
+  /// 其中解析只占 0.3s；1 万行常驻内存多出约 260MB）。
+  ///
+  /// 导出长图时切回整篇一次性布局——RepaintBoundary 只能截到已构建的内容。
+  Widget _renderBody(
+    String content,
+    ThemeData theme,
+    MarkdownConfig config,
+  ) {
+    final body = _buildBodyBlocks(content, theme, config);
     // 文末导航：回到上级目录 / 仓库首页，替代纯留白
     // 文末导航不进长图：放在重绘边界之外，导出图只含正文内容
     final tail = <Widget>[
@@ -1556,6 +1593,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _buildEndNav(theme),
       const SizedBox(height: 90),
     ];
+    final margin = AppPrefs.instance?.pageMargin ?? 16;
     return GestureDetector(
       // 手势翻页默认关闭（设置页可开）：横滑易与代码块/表格的横向滚动混淆
       onHorizontalDragEnd:
@@ -1566,56 +1604,88 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
         thumbVisibility: true,
         thickness: 4,
         radius: const Radius.circular(4),
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 长图导出边界：垫底页面背景色（避免透明 PNG 在聊天工具里
-              // 显示异常），整篇内容一次布局在边界内
-              RepaintBoundary(
-                key: _bodyCaptureKey,
-                child: ColoredBox(
-                  color: theme.scaffoldBackgroundColor,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: AppPrefs.instance?.pageMargin ?? 16,
-                    ),
-                    // 大屏行宽限制（Roadmap「阅读操作手感」）：平板/横屏/
-                    // 桌面窗口下正文限宽居中，不拉满全屏；窄屏下不起作用
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 860),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: children,
+        child: _eagerForCapture
+            ? SingleChildScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 长图导出边界：垫底页面背景色（避免透明 PNG 在聊天工具里
+                    // 显示异常），整篇内容一次布局在边界内
+                    RepaintBoundary(
+                      key: _bodyCaptureKey,
+                      child: ColoredBox(
+                        color: theme.scaffoldBackgroundColor,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: margin),
+                          // 大屏行宽限制：平板/横屏/桌面窗口下正文限宽居中
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 860),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: body,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
+                    _paddedColumn(tail, margin),
+                  ],
                 ),
-              ),
-              Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: AppPrefs.instance?.pageMargin ?? 16,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 860),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: tail,
+              )
+            : CustomScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: margin),
+                    sliver: SliverList.builder(
+                      itemCount: body.length + tail.length,
+                      itemBuilder: (context, i) {
+                        final child =
+                            i < body.length ? body[i] : tail[i - body.length];
+                        // 每个条目都登记槽位：scroll_to_index 靠连续索引
+                        // 估算未构建条目的位置，只给标题挂锚点会算错
+                        return AutoScrollTag(
+                          key: ValueKey('slot-$i'),
+                          index: i,
+                          controller: _scrollController,
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 860),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: child,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
       ),
     );
   }
+
+  /// 文末导航的限宽包装（与正文同宽同边距）。
+  Widget _paddedColumn(List<Widget> children, double margin) => Padding(
+        padding: EdgeInsets.symmetric(horizontal: margin),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children,
+            ),
+          ),
+        ),
+      );
 
   /// 同目录内切换文章：替换当前路由，保持返回栈不变。
   void _openSibling(NoteFile note) {
@@ -1637,13 +1707,22 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     );
   }
 
-  void _scrollToBottom() {
+  Future<void> _scrollToBottom() async {
     if (!_scrollController.hasClients) return;
-    _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
+    // 懒渲染下 maxScrollExtent 只是估算值：滚到底会继续构建新块、
+    // 总量随之变大，所以补齐几次直到位置不再增长
+    for (var i = 0; i < 5; i++) {
+      final before = _scrollController.position.maxScrollExtent;
+      await _scrollController.animateTo(
+        before,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!_scrollController.hasClients) return;
+      final after = _scrollController.position.maxScrollExtent;
+      if ((after - before).abs() < 1) return;
+    }
   }
 
   /// GFM 告警框：左侧色条 + 图标标题 + 正文。
@@ -1819,17 +1898,41 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   }
 
   /// 跳到第 [index] 个标题并让标题贴住视口顶部（TOC / #锚点共用）。
-  /// scrollToIndex 的定位结果常落在屏幕底部；ensureVisible alignment 0
-  /// 把标题首行对齐到视口上沿，符合「目录点了去哪儿」的直觉。
+  ///
+  /// 目标标题已构建时直接 ensureVisible（alignment 0 把首行对齐视口上沿）；
+  /// 懒渲染下目标通常还没构建，先交给 scroll_to_index 按标题锚点滚过去，
+  /// 落地后再对齐一次。
   void _jumpToHeadingTop(int index) {
     if (index < 0 || index >= _headingKeys.length) return;
     final ctx = _headingKeys[index].currentContext;
-    if (ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-      alignment: 0,
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0,
+      );
+      return;
+    }
+    if (!_scrollController.hasClients) return;
+    final slot = _headingSlots[index];
+    if (slot == null) return;
+    unawaited(
+      _scrollController
+          .scrollToIndex(
+        slot,
+        preferPosition: AutoScrollPosition.begin,
+      )
+          .then((_) {
+        if (!mounted) return;
+        final built = _headingKeys[index].currentContext;
+        if (built == null || !built.mounted) return;
+        Scrollable.ensureVisible(
+          built,
+          duration: Duration.zero,
+          alignment: 0,
+        );
+      }),
     );
   }
 

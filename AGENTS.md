@@ -19,7 +19,9 @@
   - **Android 硬约束**：git2dart 静态链接的 OpenSSL 无法访问系统证书库，`main()` 必须在 `runApp` 前依次执行 `WidgetsFlutterBinding.ensureInitialized()` → `Libgit2.version`（初始化 libgit2）→ `AndroidSSLHelper.initialize()` → `Libgit2.setSSLCertLocations(file:)`，否则 HTTPS 克隆报 "the SSL certificate is invalid"（CA 证书包随 git2dart_binaries 打包，无需自备）。
   - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。pull 用 `Isolate.run`；**clone 用 `Isolate.spawn` + `ReceivePort`**，超时 5 分钟时 `Isolate.kill` 并清理目标目录——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。clone 支持**进度与取消**：isolate 内 `Callbacks.transferProgress` 把对象数/字节经 port 回传（`[0, received, total, bytes]` 消息），UI 显示百分比与已下载体积；`CloneCancelToken.cancel()` 在下一条进度消息时生效（传输是阻塞原生调用，无法即时打断），取消路径复用 kill + 清理目录的 finally 逻辑。
   - **构建陷阱**：`INTERNET` 权限必须声明在 `android/app/src/main/AndroidManifest.xml`——Flutter 模板默认只加在 debug/profile 变体，release 包无网络权限，所有 HTTPS 请求报 `GIT_ERROR_NET: No address associated with hostname`。
+  - **dev 启动与图标 alias**：正式包把启动入口放在 `activity-alias`（桌面图标五选一），而 Flutter 工具只认 `<activity>` 上的 MAIN/LAUNCHER，`flutter run` / `flutter drive` 会报 `package identifier or launch activity not found`。因此 `android/app/src/debug/AndroidManifest.xml` 与 `src/profile/AndroidManifest.xml` 各有一份覆盖清单：给 `MainActivity` 挂启动 intent-filter、移除五个 alias。release 不读这两个目录，**图标切换只能在 release 包上验收**；改图标相关逻辑时不要动这两份清单。
 - **Markdown 渲染**：markdown_widget + 代码高亮；GFM alert（`> [!NOTE]` 等）与 .ipynb（Jupyter）转 Markdown 渲染
+  - **长文懒渲染**（`lib/src/ui/markdown_viewer.dart`）：正文按块进 `SliverList`，只构建视口附近的块，首帧与内存只和屏高有关——5000 行首帧 2.3s→0.46s、内存增量 150MB→7MB、10000 行 4.5s→0.8s（数字与复现方式见 `docs/perf.md`）。两条硬约束：① 长图导出必须切回 `_eagerForCapture` 的整篇一次性布局，否则 RepaintBoundary 只能截到已构建的块；② 目录跳转依赖 `scroll_to_index` 的**连续条目索引**（每个块都挂 `AutoScrollTag`，标题用 `_headingSlots` 记槽位），改回只给标题挂稀疏锚点会让远距离跳转算错位置。
   - **远程图片缓存**（`lib/src/ui/image_cache.dart`）：网络图先读磁盘缓存，命中立即出图（离线可读，不再等 30s 超时）；URL 经双 32 位哈希落盘到 `<docs>/imgcache`，总量 >200MB 按写入时间淘汰；超过 7 天的缓存在后台静默刷新一次，下载失败回退缓存副本。刷新与二次进入走条件请求：保存图床返回的
 ETag/Last-Modified（`<key>.img` 旁 `.meta` sidecar），带
 If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过期
@@ -122,10 +124,16 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
 ```bash
 flutter create .            # 项目尚未初始化时先执行
 flutter pub get
-flutter run                 # 运行（连接设备/模拟器）
+flutter run                 # 运行（连接设备/模拟器；dev 清单见上文 alias 说明）
 flutter analyze             # 静态检查
 flutter test
 flutter build apk --split-per-abi --target-platform android-arm64
+
+# 长文渲染基线（真机 profile；指标定义与历史数字见 docs/perf.md）
+flutter drive --profile -d <deviceId> \
+  --driver=test_driver/integration_test.dart \
+  --target=integration_test/render_perf_test.dart
+# 只测某一档、内存更干净：追加 --dart-define=PERF_SIZES=10000
 ```
 
 APK 打包约定：只打 arm64-v8a（主流手机架构），固定用上述命令

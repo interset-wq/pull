@@ -44,15 +44,23 @@ class SettingsPage extends StatelessWidget {
           const SizedBox(height: 8),
           AnimatedBuilder(
             animation: prefs,
-            builder: (context, _) => SegmentedButton<GitPlatform>(
-              segments: [
-                // 「其他」没有可拼接的域名，只作为自动识别的兜底，不供选择
-                for (final p in GitPlatform.values)
-                  if (p.webBase.isNotEmpty)
-                    ButtonSegment(value: p, label: Text(p.displayName)),
-              ],
-              selected: {prefs.platform},
-              onSelectionChanged: (s) => prefs.setPlatform(s.first),
+            builder: (context, _) => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              // 屏幕放不下五个平台名时按内容宽度横向滚动，
+              // 避免标签被逐字折行撑破分段框
+              child: SegmentedButton<GitPlatform>(
+                segments: [
+                  // 「其他」没有可拼接的域名，只作为自动识别的兜底，不供选择
+                  for (final p in GitPlatform.values)
+                    if (p.webBase.isNotEmpty)
+                      ButtonSegment(
+                        value: p,
+                        label: Text(p.displayName, softWrap: false),
+                      ),
+                ],
+                selected: {prefs.platform},
+                onSelectionChanged: (s) => prefs.setPlatform(s.first),
+              ),
             ),
           ),
           const SizedBox(height: 8),

@@ -16,6 +16,7 @@ import '../platforms/repo_info.dart';
 import '../search/repo_search.dart';
 import '../search/text_search.dart';
 import '../theme/app_prefs.dart';
+import '../utils/dir_size.dart' show formatBytes;
 import 'code_viewer.dart';
 import 'global_search_page.dart';
 import 'image_gallery.dart';
@@ -883,16 +884,47 @@ class _HomePageState extends State<HomePage> {
       rootNav.pop();
     }
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 24),
-            Expanded(child: Text('正在克隆仓库…')),
-          ],
+    // 进度对话框：对象传输阶段显示百分比与已下载体积，可取消
+    final cancelToken = CloneCancelToken();
+    final progress = ValueNotifier<CloneProgress?>(null);
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          content: ValueListenableBuilder<CloneProgress?>(
+            valueListenable: progress,
+            builder: (dialogContext, p, _) {
+              final fraction = p?.fraction;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('正在克隆仓库…'),
+                  const SizedBox(height: 16),
+                  LinearProgressIndicator(value: fraction),
+                  const SizedBox(height: 8),
+                  Text(
+                    p == null
+                        ? '连接中…'
+                        : fraction == null
+                            ? formatBytes(p.receivedBytes)
+                            : '${p.receivedObjects} / ${p.totalObjects} 个对象 · '
+                                '${formatBytes(p.receivedBytes)}',
+                    style: Theme.of(dialogContext).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: cancelToken.cancel,
+                      child: const Text('取消'),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -900,6 +932,10 @@ class _HomePageState extends State<HomePage> {
       await _sync.clone(
         repo: info,
         parentDir: await _reposRoot,
+        onProgress: (p) {
+          if (!busyClosed) progress.value = p;
+        },
+        cancelToken: cancelToken,
       );
       final root = await _reposRoot;
       RepoMeta.writeClone(
@@ -916,6 +952,16 @@ class _HomePageState extends State<HomePage> {
           const SnackBar(
             content: Text('克隆超时：请检查手机网络（Wi-Fi DNS / 移动数据）后重试'),
             duration: Duration(seconds: 6),
+          ),
+        );
+      }
+    } on SyncException catch (e) {
+      closeBusy();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message == '已取消克隆' ? '已取消克隆' : '克隆失败: $e'),
+            duration: const Duration(seconds: 2),
           ),
         );
       }

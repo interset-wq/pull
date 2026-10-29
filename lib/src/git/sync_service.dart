@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -17,9 +18,15 @@ class GitSyncService {
   /// 超时/失败必须留下干净状态：早期实现用 `Isolate.run(...).timeout()`，
   /// Future 超时后 isolate 仍在写文件、半成品目录残留，用户重试只会得到
   /// 「本地目录已存在」。这里改为可 kill 的 isolate，结束后清理目标目录。
+  ///
+  /// [onProgress] 在对象传输阶段被回调（对象数/字节）；[cancelToken.cancel()]
+  /// 后下一条进度消息到达时即终止克隆并清理目录（传输是阻塞原生调用，
+  /// 取消只能借下一次进度回调生效）。
   Future<String> clone({
     required RepoInfo repo,
     required Directory parentDir,
+    void Function(CloneProgress progress)? onProgress,
+    CloneCancelToken? cancelToken,
   }) async {
     final targetPath = '${parentDir.path}${Platform.pathSeparator}${repo.name}';
     _prepareTarget(targetPath);
@@ -32,20 +39,34 @@ class GitSyncService {
     );
     var ok = false;
     try {
-      final result = await port.first.timeout(
-        const Duration(minutes: 5),
-        onTimeout: () {
-          isolate.kill(priority: Isolate.immediate);
-          throw const SyncException(
-            '克隆超时（5 分钟）：网络过慢或仓库过大，请重试',
+      // 进度消息为 [0, received, total, bytes]；最终消息 true / 错误字符串
+      await for (final msg in port.timeout(const Duration(minutes: 5))) {
+        if (msg is List && msg.isNotEmpty && msg[0] == 0) {
+          onProgress?.call(
+            CloneProgress(
+              receivedObjects: msg[1] as int,
+              totalObjects: msg[2] as int,
+              receivedBytes: msg[3] as int,
+            ),
           );
-        },
-      );
-      if (result is String) {
-        throw SyncException(result);
+          if (cancelToken?.isCancelled ?? false) {
+            throw const SyncException('已取消克隆');
+          }
+          continue;
+        }
+        if (msg is String) {
+          throw SyncException(msg);
+        }
+        ok = true;
+        break;
       }
-      ok = true;
+      if (!ok) throw const SyncException('克隆失败：连接中断');
       return targetPath;
+    } on TimeoutException {
+      isolate.kill(priority: Isolate.immediate);
+      throw const SyncException(
+        '克隆超时（5 分钟）：网络过慢或仓库过大，请重试',
+      );
     } on SyncException {
       rethrow;
     } on Object catch (e) {
@@ -68,19 +89,28 @@ class GitSyncService {
     final path = args[2] as String;
     final send = args[3] as SendPort;
     try {
-      _cloneAt(url, branch, path);
+      _cloneAt(url, branch, path, send);
       send.send(true);
     } on Object catch (e) {
       send.send('$e');
     }
   }
 
-  static void _cloneAt(String url, String branch, String path) {
+  static void _cloneAt(String url, String branch, String path, SendPort send) {
+    final callbacks = Callbacks(
+      transferProgress: (stats) => send.send(<Object?>[
+        0,
+        stats.receivedObjects,
+        stats.totalObjects,
+        stats.receivedBytes,
+      ]),
+    );
     try {
       final r = Repository.clone(
         url: url,
         localPath: path,
         checkoutBranch: branch,
+        callbacks: callbacks,
       );
       r.free();
     } on Object {
@@ -324,6 +354,32 @@ class GitSyncService {
 }
 
 enum PullResult { upToDate, fastForwarded }
+
+/// 克隆传输进度：对象传输阶段（packfile 下载/索引）的快照。
+class CloneProgress {
+  const CloneProgress({
+    required this.receivedObjects,
+    required this.totalObjects,
+    required this.receivedBytes,
+  });
+
+  final int receivedObjects;
+  final int totalObjects;
+  final int receivedBytes;
+
+  /// 0~1；totalObjects 未知（0）时返回 null，UI 显示不确定进度。
+  double? get fraction =>
+      totalObjects > 0 ? (receivedObjects / totalObjects).clamp(0.0, 1.0) : null;
+}
+
+/// 克隆取消令牌：UI 置位后，下一条进度消息到达时终止克隆并清理目录。
+class CloneCancelToken {
+  bool _cancelled = false;
+
+  void cancel() => _cancelled = true;
+
+  bool get isCancelled => _cancelled;
+}
 
 /// pull 的完整结果：结果类型 + fast-forward 时本次变更的文件清单。
 class PullOutcome {

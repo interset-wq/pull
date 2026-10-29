@@ -47,7 +47,7 @@
 - [x] **B1 存储占用页**：设置「数据」下显示 repos / 本地镜像 / imgcache /
   元数据各占多少，单项清理带确认；imgcache 清理走 `image_cache.dart` 现有
   目录约定。*验收*：能看出 200MB 花在哪、能删。
-- [ ] **B2 克隆/拉取进度**：isolate 内 `transferProgress`（对象数/字节）经
+- [x] **B2 克隆/拉取进度**：isolate 内 `transferProgress`（对象数/字节）经
   `SendPort` 回报，UI 显示进度；clone 提供取消（复用现有 kill + 清理路径）。
   *验收*：200MB 仓库克隆有进度且能取消，取消后无半成品残留。
   *测试*：进度解析逻辑纯单测。

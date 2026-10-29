@@ -29,7 +29,6 @@ void main() {
       // 本地不存在的仓库：libgit2 立即失败，不依赖网络
       cloneUrl:
           'file:///${Directory.current.path.replaceAll('\\', '/')}/temp/no-such-repo',
-      defaultBranch: 'main',
     );
 
     await expectLater(

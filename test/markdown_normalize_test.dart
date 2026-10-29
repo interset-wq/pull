@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:reader/src/ui/markdown_viewer.dart';
+import 'package:reader/src/notes/markdown_source.dart';
 
 void main() {
   group('normalizeHtmlImages 真实案例', () {
@@ -12,7 +12,7 @@ void main() {
 <img src="figures/C0-0-logo.png" width = "1000">
 </div>
 ''';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<'), isFalse, reason: '不应残留任何 HTML 标签: $out');
       expect(out.contains("width"), isFalse, reason: '不应残留属性: $out');
       expect(out.contains('![](figures/C0-0-logo.png)'), isTrue);
@@ -22,7 +22,7 @@ void main() {
       const src = '<a href="https://x.com">\n'
           "  <img src='https://example.com/avatar.png' />\n"
           '</a>\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<'), isFalse, reason: '不应残留任何 HTML 标签: $out');
       expect(out.contains('/>'), isFalse, reason: '不应残留自闭合斜杠: $out');
       expect(out.contains('![](https://example.com/avatar.png)'), isTrue);
@@ -35,7 +35,7 @@ void main() {
           '<a href="https://x.com">\n'
           "  <img src='https://contrib.rocks/image?repo=a/b' />\n"
           '</a>\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('shields.io'), isFalse);
       expect(out.contains('contrib.rocks'), isFalse);
       expect(out.contains('[!['), isFalse);
@@ -49,7 +49,7 @@ void main() {
   <img src="https://api.star-history.com/svg?repos=a/b&type=Date" alt="chart" />
 </picture>
 ''';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<'), isFalse, reason: '不应残留任何 HTML 标签: $out');
       expect(out.contains('srcset'), isFalse);
       expect(out.contains('star-history.com'), isFalse);
@@ -57,14 +57,14 @@ void main() {
 
     test('本地 .svg 资源同样忽略，位图正常保留', () {
       const src = '![dark](assets/dark.svg)\n![photo](figures/pic.png)\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('dark.svg'), isFalse);
       expect(out.contains('![photo](figures/pic.png)'), isTrue);
     });
 
     test('空 img 标签两种写法直接移除', () {
       const src = '<img>\n<img />\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('img'), isFalse, reason: '空标签应被移除: $out');
       expect(out.contains('/>'), isFalse);
     });
@@ -72,14 +72,14 @@ void main() {
     test('collectImageUrls 按文档顺序收集', () {
       const body = '![logo](figures/a.png)\n\n![](https://x.io/b.svg)\n';
       expect(
-        MarkdownViewerPage.collectImageUrls(body),
+        collectImageUrls(body),
         ['figures/a.png', 'https://x.io/b.svg'],
       );
     });
 
     test('行内样式标签 strong/em 转 Markdown，code 保留', () {
       const src = '<strong>粗</strong> 与 <em>斜</em> 与 <code>x=1</code>\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('**粗**'), isTrue, reason: out);
       expect(out.contains('*斜*'), isTrue);
       expect(out.contains('<code>x=1</code>'), isTrue);
@@ -87,14 +87,14 @@ void main() {
 
     test('div/span 等块级包装标签被剥离', () {
       const src = '<div align="center">\n\n正文内容\n\n</div>\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('div'), isFalse, reason: out);
       expect(out.contains('正文内容'), isTrue);
     });
 
     test('h1-h6 块级标题转 # 语法', () {
       const src = '<h1>大标题</h1>\n正文<h3>小标题</h3>\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('# 大标题'), isTrue, reason: out);
       expect(out.contains('### 小标题'), isTrue);
       expect(out.contains('<h1>'), isFalse);
@@ -102,7 +102,7 @@ void main() {
 
     test('代码围栏内 HTML 标签原样保留', () {
       const src = '```\n<strong>raw</strong>\n<h2>keep</h2>\n```\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<strong>raw</strong>'), isTrue, reason: out);
       expect(out.contains('<h2>keep</h2>'), isTrue);
     });
@@ -113,7 +113,7 @@ void main() {
           '<img src="x.png">\n'
           'a<br>b\n'
           '```\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<div class="a">box</div>'), isTrue, reason: out);
       expect(out.contains('<img src="x.png">'), isTrue, reason: out);
       expect(out.contains('a<br>b'), isTrue, reason: out);
@@ -121,7 +121,7 @@ void main() {
 
     test('行内代码中的 HTML 标签原样保留', () {
       const src = '用 `<div>` 与 `a<br>b` 与 `<img src="x">` 演示\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('`<div>`'), isTrue, reason: out);
       expect(out.contains('`a<br>b`'), isTrue, reason: out);
       expect(out.contains('`<img src="x">`'), isTrue, reason: out);
@@ -129,7 +129,7 @@ void main() {
 
     test('行内代码外的 <br> 照常转换为换行', () {
       const src = '上句<br>下句\n';
-      final out = MarkdownViewerPage.normalizeHtmlImages(src);
+      final out = normalizeHtmlImages(src);
       expect(out.contains('<br'), isFalse, reason: out);
       expect(out.contains('上句'), isTrue);
       expect(out.contains('下句'), isTrue);

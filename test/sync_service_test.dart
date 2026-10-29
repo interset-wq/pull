@@ -11,7 +11,6 @@ void main() {
     owner: 'interset-wq',
     name: 'notes',
     cloneUrl: 'https://gitcode.com/interset-wq/notes.git',
-    defaultBranch: 'main',
   );
 
   final sync = GitSyncService();

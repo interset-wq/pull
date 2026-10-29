@@ -46,8 +46,10 @@ class SettingsPage extends StatelessWidget {
             animation: prefs,
             builder: (context, _) => SegmentedButton<GitPlatform>(
               segments: [
+                // 「其他」没有可拼接的域名，只作为自动识别的兜底，不供选择
                 for (final p in GitPlatform.values)
-                  ButtonSegment(value: p, label: Text(p.displayName)),
+                  if (p.webBase.isNotEmpty)
+                    ButtonSegment(value: p, label: Text(p.displayName)),
               ],
               selected: {prefs.platform},
               onSelectionChanged: (s) => prefs.setPlatform(s.first),

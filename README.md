@@ -6,11 +6,11 @@
 
 **把笔记仓库装进口袋的原生阅读器**
 
-*GitHub / Gitee / GitCode 笔记仓库克隆到手机，零部署、零构建托管，仓库本身即数据源*
+*GitHub / Gitee / GitCode / GitLab 笔记仓库克隆到手机，零部署、零构建托管，仓库本身即数据源*
 
 [![Platform](https://img.shields.io/badge/platform-Android-4c8f56)](#-下载)
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Release](https://img.shields.io/badge/release-v1.10.5-f5b301)](https://github.com/interset-wq/pullread/releases)
+[![Release](https://img.shields.io/badge/release-v1.11.0-f5b301)](https://github.com/interset-wq/pullread/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
@@ -30,7 +30,8 @@
 - **HTML 兼容**：内联/块级 HTML 标签自动转换
 
 ### 📡 克隆与同步
-- 通过统一抽象层（`RepositoryAdapter`）接入 GitHub / Gitee / GitCode，业务代码不绑定任何平台 API
+- 克隆只依赖仓库的完整 URL：GitHub / Gitee / GitCode / GitLab 与自建 Gitea 等公开仓库
+  都能加；平台枚举只用于来源展示与「用户名/仓库名」短地址拼接，不调用任何平台 API
 - 整仓克隆；启动时可选自动拉取同步（设置内开关，默认关闭），仓库页支持下拉/按钮手动刷新
 - 克隆有进度可取消：显示对象数与已下载体积，取消后清理半成品目录，重试不会撞上「目录已存在」
 - 同步可感知：仓库卡显示上次同步时间；仓库页「更多 → 检查更新」先告知落后多少个提交，再决定是否拉取；

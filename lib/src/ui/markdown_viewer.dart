@@ -24,6 +24,7 @@ import '../local/local_folder_service.dart';
 import '../notes/details_syntax.dart';
 import '../notes/gfm_alerts.dart';
 import '../notes/ipynb.dart';
+import '../notes/markdown_source.dart';
 import '../notes/math_render.dart';
 import '../notes/note_index.dart';
 import '../notes/note_scanner.dart';
@@ -36,7 +37,7 @@ import 'code_viewer.dart';
 import 'copy_button.dart';
 import 'code_font.dart';
 import 'h_scrollbar.dart';
-import 'home_page.dart';
+import 'repo_page.dart';
 import 'image_gallery.dart';
 import 'markdown_editor.dart';
 import 'repo_image.dart';
@@ -62,123 +63,6 @@ class MarkdownViewerPage extends StatefulWidget {
   /// 从书签进入时携带的全篇滚动比例（0~1）：加载后直接落到该位置，
   /// 优先级低于 [initialFindQuery]。与续读恢复互斥。
   final double? initialFraction;
-
-  /// 匹配 <img src="...">（属性顺序任意、单双引号均可、含尾部其余属性）。
-  static final RegExp _htmlImgRegExp = RegExp(
-    r'''<img[^>]*\ssrc=["']([^"']+)["'][^>]*>''',
-    caseSensitive: false,
-  );
-
-  /// [![alt](img)](link) 徽章式链接图片展平为纯图片。
-  static final RegExp _badgeLinkImgRegExp = RegExp(
-    r'\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)]+)\)',
-  );
-
-  /// SVG 徽章类图片直接忽略：非常用位图格式、难以排版
-  /// （shields.io / contrib.rocks / star-history / .svg 文件）。
-  static final RegExp _ignoredImageRegExp = RegExp(
-    r'!\[[^\]]*\]\((?:[^)]*\.svg(?:\?[^)]*)?'
-    r'|https?://img\.shields\.io/[^)]*'
-    r'|https?://contrib\.rocks/[^)]*'
-    r'|https?://api\.star-history\.com/[^)]*)\)',
-    caseSensitive: false,
-  );
-
-  /// <div><img src="x"/></div> 等 HTML 内嵌图片转 Markdown 图片语法，
-  /// 徽章链接展平为纯图片，同时归一化 <br> 与块级 div/p/a 包裹。
-  /// 代码保护段：围栏代码块（``` / ~~~，允许未闭合）与行内代码（单反引号）。
-  /// 匹配到的段落内不做任何 HTML 归一化，标签原样显示。
-  static final RegExp _codeProtectedRegExp = RegExp(
-    r'```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`',
-  );
-
-  static String normalizeHtmlImages(String md) {
-    final out = StringBuffer();
-    var cursor = 0;
-    for (final m in _codeProtectedRegExp.allMatches(md)) {
-      out
-        ..write(_normalizeHtmlImagesPlain(md.substring(cursor, m.start)))
-        ..write(m.group(0)!);
-      cursor = m.end;
-    }
-    out.write(_normalizeHtmlImagesPlain(md.substring(cursor)));
-    return out.toString();
-  }
-
-  /// 普通文本段的 HTML 归一化（调用前已剥离代码保护段）。
-  static String _normalizeHtmlImagesPlain(String md) {
-    final stripped = md
-        .replaceAllMapped(
-          _htmlImgRegExp,
-          (m) => '\n\n![](${m.group(1)!})\n\n',
-        )
-        .replaceAllMapped(
-          _badgeLinkImgRegExp,
-          (m) => '![${m.group(1)!}](${m.group(2)!})',
-        )
-        // 无 src 的空 img 标签（<img> / <img />）与其余 img 残壳直接移除
-        .replaceAll(RegExp(r'<img\b[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?a\b[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?div[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?picture[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<source\b[^>]*/?>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?center[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n\n')
-        .replaceAll(RegExp(r'</?p\b[^>]*>', caseSensitive: false), '\n\n')
-        // 徽章/SVG 图片在排版中无意义，直接忽略
-        .replaceAll(_ignoredImageRegExp, '');
-    return _convertHtmlTags(stripped);
-  }
-
-  /// HTML 标签转 Markdown：
-  /// 块级 h1-h6 → `#` 标题；strong/b→加粗、em/i→斜体、del/s/strike→删除线；
-  /// u/mark/kbd/sub/sup/small/span/font 等无等价语法的剥壳保留文字。
-  static String _convertHtmlTags(String md) {
-    var text = md;
-    // 块级标题：<h1>标题</h1> → # 标题（多行内容取首行）
-    text = text.replaceAllMapped(
-      RegExp(
-        r'<h([1-6])\b[^>]*>([\s\S]*?)</h\1\s*>',
-        caseSensitive: false,
-      ),
-      (m) {
-        final level = int.parse(m.group(1)!);
-        final inner =
-            m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
-        return '\n\n${'#' * level} $inner\n\n';
-      },
-    );
-    return text
-        .replaceAllMapped(
-          RegExp(r'<(strong|b)\b[^>]*>([\s\S]*?)</\1\s*>',
-              caseSensitive: false),
-          (m) => '**${m.group(2)!}**',
-        )
-        .replaceAllMapped(
-          RegExp(r'<(em|i)\b[^>]*>([\s\S]*?)</\1\s*>', caseSensitive: false),
-          (m) => '*${m.group(2)!}*',
-        )
-        .replaceAllMapped(
-          RegExp(r'<(del|s|strike)\b[^>]*>([\s\S]*?)</\1\s*>',
-              caseSensitive: false),
-          (m) => '~~${m.group(2)!}~~',
-        )
-        .replaceAll(
-          RegExp(
-            r'</?(u|mark|kbd|sub|sup|small|span|font)\b[^>]*>',
-            caseSensitive: false,
-          ),
-          '',
-        );
-  }
-
-  /// 收集文档中按顺序出现的图片地址（Markdown 图片语法）。
-  static List<String> collectImageUrls(String body) => RegExp(
-        r'!\[[^\]]*\]\(([^)\s]+)\)',
-      )
-          .allMatches(body)
-          .map((m) => m.group(1)!)
-          .toList();
 
   @override
   State<MarkdownViewerPage> createState() => _MarkdownViewerPageState();
@@ -477,7 +361,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       _tags = fm.tags;
       body = fm.body;
     }
-    body = MarkdownViewerPage.normalizeHtmlImages(body);
+    body = normalizeHtmlImages(body);
     _bodySource = body;
     _toc = extractToc(body);
     _headingKeys
@@ -511,36 +395,14 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       });
     }
 
-    _imageUrls = MarkdownViewerPage.collectImageUrls(body);
-    _readingMinutes = _estimateReadingMinutes(body);
+    _imageUrls = collectImageUrls(body);
+    _readingMinutes = estimateReadingMinutes(body);
     // 首帧布局完成后恢复位置：不依赖用户先滚一下才触发
     if (_restorePending) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _maybeRestoreProgress());
     }
     return body;
-  }
-
-  /// 估算阅读分钟数：正文按 300 字/分钟，代码块按 200 字符/分钟折算，
-  /// 结果保留 1 位小数精度（<1 分钟显示"约 1 分钟"）。
-  int _estimateReadingMinutes(String body) {
-    var codeChars = 0;
-    var textChars = 0;
-    var inFence = false;
-    for (final line in body.split('\n')) {
-      final t = line.trim();
-      if (t.startsWith('```') || t.startsWith('~~~')) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) {
-        codeChars += t.length;
-      } else {
-        textChars += t.replaceAll(RegExp(r'\s'), '').length;
-      }
-    }
-    final minutes = textChars / 300 + codeChars / 200;
-    return minutes < 1 ? 1 : minutes.ceil();
   }
 
   @override
@@ -1945,7 +1807,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
   int _headingIndexForAnchor(String anchor) {
     final a = anchor.toLowerCase();
     for (var i = 0; i < _toc.length; i++) {
-      if (_slugify(_toc[i].text) == a) return i;
+      if (slugifyHeading(_toc[i].text) == a) return i;
     }
     return -1;
   }
@@ -2269,12 +2131,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
       ),
     );
   }
-
-  static String _slugify(String text) => text
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^\p{L}\p{N}\s-]'), '')
-      .trim()
-      .replaceAll(RegExp(r'\s+'), '-');
 
   void _showTocSheet() {
     if (_toc.isEmpty) {

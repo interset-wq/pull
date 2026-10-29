@@ -53,7 +53,6 @@ void main() {
         owner: 'me',
         name: 'notes',
         cloneUrl: remote,
-        defaultBranch: 'main',
       ),
       parentDir: reposRoot,
     );

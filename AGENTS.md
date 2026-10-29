@@ -116,7 +116,7 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
     原图解码占几十 MB；图库仍按原图（可放大看细节）
   - 从正文搜索结果进入时传 `initialFindQuery`：自动打开查找条、统计命中并
     定位到第一处（否则用户还要自己滚到命中位置）
-- **平台适配**：GitHub / Gitee / GitCode 必须通过统一抽象层（`RepositoryAdapter` 之类的接口）接入，禁止在业务代码里直接写某家平台的 API 调用
+- **平台适配**：克隆只依赖用户给的**完整 URL**（GitHub / Gitee / GitCode / GitLab / 自建 Gitea 都可以），`GitPlatform` 枚举只用于展示与「用户名/仓库名 → URL」的短名拼接，禁止业务代码调用任何平台 REST API。原先的 `RepositoryAdapter` / adapter_factory / 四个平台 adapter 因无人调用已删除（2026-10）——新增平台只需补枚举与 `guessPlatform`，不要再引回 HTTP 抽象层。
 - **鉴权**：如需 token 只存本地，禁止硬编码或写入日志；当前仅支持公开仓库（用户明确不需要私有仓库功能）
 
 ## 第一版范围（反目标即边界）
@@ -154,6 +154,11 @@ APK 打包约定：只打 arm64-v8a（主流手机架构），固定用上述命
 约 32MB；通用 fat APK 约 79MB）。注意：gradle `ndk.abiFilters` 对
 Flutter 注入的 so 无效且与 `--split-per-abi` 冲突，不要用它限制架构；
 x86_64 模拟器无法安装本 APK，模拟器调试走 debug 构建。
+
+CI（`.github/workflows/ci.yml`）：PR / main push 跑 `flutter analyze --fatal-infos`
++ `flutter test`，另有独立的 `build-apk` job 构建 debug arm64 APK——清单合并、
+图标资源、插件兼容这类问题只有真正 assemble 才会暴露。Release 仍只由 `v*` tag
+触发 `release.yml`。
 
 发版约定：正式 Release 只经 GitHub（interset-wq/pullread）发布——推送
 `v*` tag 触发 `.github/workflows/release.yml`，CI 校验 tag 与

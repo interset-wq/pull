@@ -13,7 +13,7 @@
 |---|---|
 | 代码 | main，工作区干净（本轮文档提交尚未推送）；版本号与 tag 一致 |
 | 版本 | 1.10.5+15 |
-| 检查 | analyze 零问题，156 个测试全绿 |
+| 检查 | analyze 零问题，175 个测试全绿 |
 | CI | PR / main push 跑 analyze + test |
 | 设备 | DIO AN00 在线，可装包实测 |
 
@@ -90,19 +90,26 @@
 - [x] **5.1 克隆不猜分支**：`Repository.clone` 不再传 `checkoutBranch`（libgit2 检出远端
   HEAD），删掉「删目录重克隆」的 fallback；克隆后用 `readHeadBranch` 把真实分支写进
   meta。避免默认分支非 `main` 的仓库下载两遍。
-- [ ] **5.2 依赖治理**：保留 `shared_preferences 2.3.2` 的锁（2.5.x 的 Pigeon/JNI 在部分
-  设备上 `getAll` 不返回，见 `c659292`）；删零引用的 `cupertino_icons`；升 `flutter_svg`；
-  `flutter pub upgrade` 解锁传递依赖。
-- [ ] **5.3 测试补齐**（按数据完整性排序）：`markdown_editor`、`app_prefs`、`dir_size`、
-  `pull_progress`、`global_search_page`（历史/过滤/仅标题）、`storage_page`。
-- [ ] **5.4 拆巨石**：`markdown_viewer.dart` 3308 行、`home_page.dart` 2634 行——先搬纯
-  函数、再搬独立渲染组件、最后拆 `RepoPage` 与阅读页控制器；目标 <1500 / <1200 行。
-- [ ] **5.5 平台与 CI**：删掉无人调用的四个平台 adapter + factory（克隆只依赖 URL）；
-  `guessPlatform` 补 GitLab 与通用「其他」；剪贴板识别放宽到任意仓库 URL；CI 增加
-  `flutter build apk --debug` job，挡 Android 清单/插件回归。
+- [x] **5.2 依赖治理**：保留 `shared_preferences 2.3.2` 的锁（2.5.x 的 Pigeon/JNI 在部分
+  设备上 `getAll` 不返回，见 `c659292`）；删零引用的 `cupertino_icons`；`flutter_svg`
+  升到 2.3.2；`flutter pub upgrade` 解锁 crypto/meta/vector_math 等 15 个包。
+- [x] **5.3 测试补齐**：`markdown_editor`（顺带修了「编辑后离开不提示」的脏状态 bug）、
+  `app_prefs`、`dir_size`、`pull_progress`、`global_search_page`（顺带修了改仓库过滤
+  不重跑查询的 bug）。`storage_page` 是只读展示 + 一次清理，逻辑已由 `dir_size` 覆盖，
+  暂不单测。
+- [x] **5.4a 拆巨石（第一刀）**：`RepoPage` 从 home_page 拆到 `repo_page.dart`
+  （2634→1479 行）；Markdown 纯函数拆到 `notes/markdown_source.dart`；`guessPlatform`
+  移入 `git_platform.dart`。
+- [ ] **5.4b 阅读页继续瘦身**：`markdown_viewer.dart` 仍有约 3150 行。剩下的不是机械
+  搬移——渲染组件与「进度/查找/导出/书签」需要先收成控制器或 part，再拆状态类；
+  留到下一次触碰该文件时做，目标 <1500 行。
+- [x] **5.5 平台与 CI**：删掉无人调用的四个平台 adapter + factory；`guessPlatform` 补
+  GitLab 与通用「其他」（`webBase` 为空时不拼短地址）；剪贴板识别放宽到任意
+  `host/owner/repo` URL；CI 增加 `flutter build apk --debug` job；`RepoInfo` 去掉
+  已无用的 `defaultBranch`。
 - [ ] **5.6 iOS**：没有 Mac 硬件，冻结；只记录恢复条件（macOS + 真机 + 备选图标 API 验证）。
 - *验收*：每项独立提交；analyze + 全量测试全绿；5.5 后 CI 的构建 job 能跑通；
-  阶段结束发 1.11.0。
+  阶段结束发 1.11.0。（5.4b 不计入本次发版阻塞项）
 
 ## 四、候选池（不排期）
 

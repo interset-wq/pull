@@ -5,8 +5,8 @@ import 'package:reader/src/git/sync_service.dart';
 import 'package:reader/src/platforms/git_platform.dart';
 import 'package:reader/src/platforms/repo_info.dart';
 
-/// 克隆不再猜默认分支：调用方给错的 defaultBranch 也应一次成功，
-/// 并检出远端 HEAD（这里是 master）。
+/// 克隆不再猜默认分支：RepoInfo 里没有分支字段，克隆直接检出远端 HEAD
+/// （这里是 master），一次成功。
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -48,7 +48,6 @@ void main() {
         name: 'notes',
         cloneUrl: remote,
         // 故意给错的默认分支：旧实现会先按 main 克隆、失败后删目录重来
-        defaultBranch: 'main',
       ),
       parentDir: reposRoot,
     );

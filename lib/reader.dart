@@ -2,10 +2,5 @@
 library;
 
 export 'src/git/sync_service.dart';
-export 'src/platforms/adapter_factory.dart';
 export 'src/platforms/git_platform.dart';
-export 'src/platforms/github_adapter.dart';
-export 'src/platforms/gitcode_adapter.dart';
-export 'src/platforms/gitee_adapter.dart';
 export 'src/platforms/repo_info.dart';
-export 'src/platforms/repository_adapter.dart';

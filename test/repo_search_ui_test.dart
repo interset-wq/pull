@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:reader/src/ui/home_page.dart';
+import 'package:reader/src/ui/repo_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 仓库页搜索框：文件名过滤与「文件名 / 正文」切换。

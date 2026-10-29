@@ -1,7 +1,47 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- The INTERNET permission is required for development. Specifically,
          the Flutter tool needs it to communicate with the running application
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 开发构建专用入口，release 不读这个目录，发版行为不受影响。
+
+         正式包为了「桌面图标五选一」把启动入口放在 activity-alias 上，而
+         Flutter 工具链（flutter run / flutter drive / aapt badging）只认挂在
+         <activity> 上的 MAIN/LAUNCHER，于是报 "package identifier or launch
+         activity not found"，flutter run 完全不可用。这里在 debug 构建里：
+
+         1) 给 MainActivity 本身挂上启动 intent-filter，工具链能找到入口；
+         2) 移除五个 activity-alias，避免桌面出现两个图标。
+
+         代价：debug 包里图标切换通道会失败（Dart 侧静默忽略），
+         图标相关验收必须用 release 包。 -->
+    <application>
+        <activity
+            android:name=".MainActivity"
+            tools:node="merge">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name=".MainActivityBook"
+            tools:node="remove" />
+        <activity-alias
+            android:name=".MainActivityPage"
+            tools:node="remove" />
+        <activity-alias
+            android:name=".MainActivityArrow"
+            tools:node="remove" />
+        <activity-alias
+            android:name=".MainActivityConverge"
+            tools:node="remove" />
+        <activity-alias
+            android:name=".MainActivityTray"
+            tools:node="remove" />
+    </application>
 </manifest>

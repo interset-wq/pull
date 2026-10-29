@@ -7,32 +7,28 @@
 > 推进方式：每项一个原子提交，`flutter analyze` + `flutter test` 全绿才算完，
 > 交互改动在真机（DIO AN00）上装包实测后再合。
 
-## 现状基线（写本计划时核实）
+## 现状基线（2026-10-29 核实）
 
-- main 在 `1c9c35a`，工作区干净；本地领先 origin/main 2 个提交（条件请求 + 逐字高亮），未推
-- 115 个测试全绿，analyze 零问题
-- 上一轮「打开 → 读 → 翻页 → 找」阅读链路已交付并真机实测：
-  打开文章复用索引缓存、打开即续读（无弹窗）、图片按屏宽解码、搜索直达命中
-- 本轮刚交付：**图片缓存条件请求**（ETag/Last-Modified sidecar，304 复用）、
-  **文内查找逐字高亮**（`textGenerator` 接管文本节点，命中加底色）
+- main 在 `0ce6787`，与 origin/main 齐平；工作区干净；最新发版 v1.10.5+15
+- 115 个测试全绿，`flutter analyze --fatal-infos` 零问题
+- PR/main 的 CI 已上线（`.github/workflows/ci.yml`）
+- 第一轮「打开 → 读 → 翻页 → 找」与第二轮 A/B/C 批次均已交付并在真机（DIO AN00）实测，
+  交付明细见各原子提交与 `Roadmap.md`
 
 ## 判据（仍存在的缺口）
 
 | 缺口 | 证据 | 影响 |
 |---|---|---|
-| clone/pull 无进度、不可取消 | `sync_service.dart`（clone 已是可 kill isolate，但无进度回报） | 大仓库只有转圈；git2dart 支持 `Callbacks.transferProgress` |
-| 图片缓存无占用/清理入口 | `image_cache.dart` 只在写入超 200MB 时淘汰 | 用户看不见 200MB 花在哪，删不掉 |
-| 没有 PR CI | `.github/workflows/` 只有 tag 触发的 release | 回归风险随时间上升，全靠本地 analyze/test |
-| 标签页依赖 front-matter | `tag_index.dart` 只读 `tags:` | 没写 front-matter 的仓库里标签功能等于不存在 |
-| 搜索无过滤/历史 | `global_search_page.dart` 纯逐仓顺序匹配 | 命中多时无法限定仓库或「仅标题」 |
-| 长文渲染性能未测 | 正文整篇一次性布局（非懒加载） | 几千行笔记首帧与滚动偏重，无基线数据 |
+| 正文整篇一次性布局 | `markdown_viewer.dart` 用 `SingleChildScrollView` + `Column`，无懒加载 | 几千行笔记首帧与滚动偏重，无基线数据 |
+| Notebook 富输出缺失 | `ipynb.dart` 对 `image/png`、`text/html` 只输出「暂不支持」占位 | matplotlib 图表、pandas 表格在 `.ipynb` 里看不到 |
+| 代码查看无大纲 | `code_viewer.dart` 只有行号与高亮 | 长代码文件只能滚，无结构导航 |
+| 导出缺 PDF | 长图 / 分享卡片已交付，PDF 未做 | 分享整篇文档的通用格式缺一档 |
 | iOS 未冒烟 | 本地文件夹走桌面分支；图标切换 iOS 未实现 | 双端承诺未闭环 |
 
 ## 批次 A · 一致性与护栏（先做，1–2 天）
 
-- [ ] **A1 PR CI**：新增 `.github/workflows/ci.yml`，Ubuntu + Flutter 3.47.x 跑
-  `flutter analyze` + `flutter test`（约 3 分钟），PR 与 main push 均触发。
-  *验收*：PR 上能看到检查结果；不与 release.yml 的 tag 路径冲突。
+- [x] **A1 PR CI**：`.github/workflows/ci.yml`（Ubuntu + Flutter 3.47.4）跑
+  `flutter analyze --fatal-infos` + `flutter test`，PR 与 main push 均触发。
 - [ ] **A2 长文渲染性能基线**：用几千行的真实笔记在 profile 模式测首帧与滚动
   jank（帧耗时数据），据此决定「分块渲染」还是只延后构建重型块
   （mermaid/长代码/大表格）。只测量与记录，方案另立项。
@@ -54,11 +50,10 @@
 
 ## 批次 C · 检索补全（5–8 天）
 
-- [ ] **C1 搜索增强**：历史记录（本地持久化）、按仓库/标签过滤、
-  「仅标题 / 仅正文」模式。*验收*：搜索能限定仓库。
-- [ ] **C2 标签可用性**：目录名当隐式标签（可开关）或首页加「最近更新」
-  跨仓库视图，解决没写 front-matter 的仓库；不越界到双链/图谱。
-  *验收*：无 tags 的仓库也能用标签导航。
+- [x] **C1 搜索增强**：历史记录（本地持久化）、按仓库过滤、
+  「正文 / 仅标题」模式。
+- [x] **C2 标签可用性**：目录名当隐式标签（设置开关，默认开）解决没写
+  front-matter 的仓库；未越界到双链/图谱。
 
 ## 批次 D · 平台与遗留（按需，不排期）
 

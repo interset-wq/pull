@@ -184,6 +184,12 @@ class AppPrefs extends ChangeNotifier {
   static AppPrefs? _instance;
   static AppPrefs? get instance => _instance;
 
+  /// 仅测试用：清掉单例，让下一次 [load] 重新从 SharedPreferences 读取。
+  @visibleForTesting
+  static void resetForTest() {
+    _instance = null;
+  }
+
   /// 启动时读取持久化设置（幂等，重复调用返回同一实例）。
   /// 偏好只是"锦上添花"：读取失败或超时一律回退默认值，绝不阻塞启动。
   static Future<AppPrefs> load() async {

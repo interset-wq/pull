@@ -17,9 +17,15 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    // 头部品牌已由文字改为 logo；这里断言页面骨架而非具体文案
+    // 头部品牌已由文字改为 logo；设置/标签/更新收进「更多」菜单
     expect(find.byType(Scaffold), findsOneWidget);
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.more_vert), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('标签'), findsOneWidget);
   });
 }

@@ -431,17 +431,6 @@ class _RepoPageState extends State<RepoPage> {
       appBar: AppBar(
         title: Text(title, style: theme.textTheme.titleLarge),
         actions: [
-          // 深层目录一键弹回仓库根，免去逐级返回
-          if (widget.subPath.isNotEmpty)
-            IconButton(
-              tooltip: '回到根目录',
-              icon: const Icon(Icons.home_outlined),
-              onPressed: () => Navigator.popUntil(
-                context,
-                (route) =>
-                    route.settings.name == 'repo-root' || route.isFirst,
-              ),
-            ),
           IconButton(
             onPressed: _pull,
             icon: const Icon(Icons.sync),
@@ -455,18 +444,18 @@ class _RepoPageState extends State<RepoPage> {
             onPressed: () =>
                 setState(() => _sortByModified = !_sortByModified),
           ),
-          IconButton(
-            tooltip: _unreadOnly ? '显示全部文件' : '仅看未读',
-            icon: Icon(
-              _unreadOnly ? Icons.filter_alt : Icons.filter_alt_outlined,
-            ),
-            color: _unreadOnly ? theme.colorScheme.primary : null,
-            onPressed: () => setState(() => _unreadOnly = !_unreadOnly),
-          ),
           PopupMenuButton<String>(
             tooltip: '更多',
             onSelected: (value) {
               switch (value) {
+                case 'unread':
+                  setState(() => _unreadOnly = !_unreadOnly);
+                case 'home':
+                  Navigator.popUntil(
+                    context,
+                    (route) =>
+                        route.settings.name == 'repo-root' || route.isFirst,
+                  );
                 case 'updates':
                   _checkUpdates();
                 case 'links':
@@ -474,6 +463,33 @@ class _RepoPageState extends State<RepoPage> {
               }
             },
             itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'unread',
+                child: Row(
+                  children: [
+                    Icon(
+                      _unreadOnly
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(_unreadOnly ? '显示全部文件' : '仅看未读'),
+                  ],
+                ),
+              ),
+              if (widget.subPath.isNotEmpty)
+                const PopupMenuItem(
+                  value: 'home',
+                  child: Row(
+                    children: [
+                      Icon(Icons.home_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('回到根目录'),
+                    ],
+                  ),
+                ),
+              const PopupMenuDivider(),
               if (!LocalFolderService.isLocalMirror(widget.repoDir.path))
                 const PopupMenuItem(
                   value: 'updates',

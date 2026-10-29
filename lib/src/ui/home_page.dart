@@ -334,6 +334,55 @@ class _HomePageState extends State<HomePage> {
     unawaited(_loadBookmarks());
   }
 
+  /// 主题三档选择（首页「更多」菜单进入，替代原来占位的主题图标）。
+  void _showThemeSheet(AppPrefs prefs) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListenableBuilder(
+          listenable: prefs,
+          builder: (context, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('主题'),
+              ),
+              RadioGroup<ThemeMode>(
+                groupValue: prefs.mode,
+                onChanged: (mode) {
+                  if (mode != null) prefs.setMode(mode);
+                  Navigator.pop(sheetContext);
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final entry in const [
+                      (ThemeMode.system, '跟随系统', Icons.brightness_auto),
+                      (ThemeMode.light, '浅色', Icons.light_mode),
+                      (ThemeMode.dark, '深色', Icons.dark_mode),
+                    ])
+                      RadioListTile<ThemeMode>(
+                        value: entry.$1,
+                        title: Row(
+                          children: [
+                            Icon(entry.$3, size: 20),
+                            const SizedBox(width: 12),
+                            Text(entry.$2),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -362,25 +411,6 @@ class _HomePageState extends State<HomePage> {
                     ),
           ),
           IconButton(
-            tooltip: '标签',
-            icon: const Icon(Icons.sell_outlined),
-            onPressed: (repos.isEmpty && locals.isEmpty)
-                ? null
-                : () => _openTags(repos),
-          ),
-          IconButton(
-            tooltip: '全部更新',
-            icon: _updatingAll
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.cloud_sync_outlined),
-            onPressed:
-                (_cloning || _updatingAll || _repos == null) ? null : _pullAll,
-          ),
-          IconButton(
             tooltip: '更新收件箱',
             icon: Badge(
               isLabelVisible: _updateCount > 0,
@@ -389,68 +419,89 @@ class _HomePageState extends State<HomePage> {
             ),
             onPressed: (repos.isEmpty && locals.isEmpty) ? null : _openUpdates,
           ),
-          if (AppPrefs.instance case final prefs?) ...[
-            IconButton(
-              tooltip: '设置',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => SettingsPage(prefs: prefs),
+          if (_updatingAll)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
             ),
-            ListenableBuilder(
-              listenable: prefs,
-              builder: (context, _) {
-                return PopupMenuButton<ThemeMode>(
-                  tooltip: '主题',
-                  icon: Icon(
-                    switch (prefs.mode) {
-                      ThemeMode.system => Icons.brightness_auto,
-                      ThemeMode.light => Icons.light_mode,
-                      ThemeMode.dark => Icons.dark_mode,
-                    },
-                  ),
-                  onSelected: (m) => prefs.setMode(m),
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: ThemeMode.system,
-                      child: Row(
-                        children: [
-                          Icon(Icons.brightness_auto, size: 20),
-                          SizedBox(width: 12),
-                          Text('跟随系统'),
-                        ],
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              final prefs = AppPrefs.instance;
+              switch (value) {
+                case 'tags':
+                  _openTags(repos);
+                case 'sync':
+                  _pullAll();
+                case 'theme':
+                  if (prefs != null) _showThemeSheet(prefs);
+                case 'settings':
+                  if (prefs != null) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => SettingsPage(prefs: prefs),
                       ),
-                    ),
-                    const PopupMenuItem(
-                      value: ThemeMode.light,
-                      child: Row(
-                        children: [
-                          Icon(Icons.light_mode, size: 20),
-                          SizedBox(width: 12),
-                          Text('浅色'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: ThemeMode.dark,
-                      child: Row(
-                        children: [
-                          Icon(Icons.dark_mode, size: 20),
-                          SizedBox(width: 12),
-                          Text('深色'),
-                        ],
-                      ),
-                    ),
+                    );
+                  }
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'tags',
+                enabled: !(repos.isEmpty && locals.isEmpty),
+                child: const Row(
+                  children: [
+                    Icon(Icons.sell_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('标签'),
                   ],
-                );
-              },
-            ),
-          ],
-        ],
-      ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'sync',
+                enabled: !(_cloning || _updatingAll || _repos == null),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_sync_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Text(_updatingAll ? '正在更新…' : '全部更新'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'theme',
+                enabled: AppPrefs.instance != null,
+                child: const Row(
+                  children: [
+                    Icon(Icons.brightness_auto, size: 20),
+                    SizedBox(width: 12),
+                    Text('主题'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'settings',
+                enabled: AppPrefs.instance != null,
+                child: const Row(
+                  children: [
+                    Icon(Icons.settings_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('设置'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _cloning ? null : _showCloneDialog,
         child: _cloning

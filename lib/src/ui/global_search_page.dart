@@ -58,6 +58,14 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
     _debounce = Timer(const Duration(milliseconds: 400), () => _run(q));
   }
 
+  /// 条件变化（模式切换 / 仓库过滤）后重跑当前查询；查询太短直接忽略。
+  void _scheduleRun([int delayMs = 200]) {
+    if (_query.length < 2) return;
+    _debounce?.cancel();
+    setState(() => _searching = true);
+    _debounce = Timer(Duration(milliseconds: delayMs), () => _run(_query));
+  }
+
   /// 仓库在当前过滤范围（全部 / 勾选集合）内才参与检索。
   bool _inScope(Directory repo) {
     if (_selectedRepos.isEmpty) return true;
@@ -144,14 +152,7 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
                       _titleOnly = selection.first;
                       _hits = const [];
                     });
-                    if (_query.length >= 2) {
-                      setState(() => _searching = true);
-                      _debounce?.cancel();
-                      _debounce = Timer(
-                        const Duration(milliseconds: 200),
-                        () => _run(_query),
-                      );
-                    }
+                    _scheduleRun();
                   },
                 ),
                 const SizedBox(width: 8),
@@ -177,7 +178,10 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
             selected: _selectedRepos.isEmpty,
             showCheckmark: false,
             visualDensity: VisualDensity.compact,
-            onSelected: (_) => setState(() => _selectedRepos = {}),
+            onSelected: (_) {
+              setState(() => _selectedRepos = {});
+              _scheduleRun();
+            },
           ),
           for (final repo in widget.repos)
             Padding(
@@ -187,13 +191,17 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
                 selected: _selectedRepos.contains(_repoName(repo)),
                 showCheckmark: false,
                 visualDensity: VisualDensity.compact,
-                onSelected: (selected) => setState(() {
-                  final next = Set.of(_selectedRepos);
-                  selected
-                      ? next.add(_repoName(repo))
-                      : next.remove(_repoName(repo));
-                  _selectedRepos = next;
-                }),
+                onSelected: (selected) {
+                  setState(() {
+                    final next = Set.of(_selectedRepos);
+                    selected
+                        ? next.add(_repoName(repo))
+                        : next.remove(_repoName(repo));
+                    _selectedRepos = next;
+                  });
+                  // 改过滤条件立即重跑，否则要再改一次查询才生效
+                  _scheduleRun();
+                },
               ),
             ),
         ],

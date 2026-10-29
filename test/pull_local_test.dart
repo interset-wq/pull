@@ -35,6 +35,12 @@ void main() {
     await _git(['add', '.'], work);
     await _git(['commit', '-m', 'first'], work);
     await _git(['init', '--bare', remote], temp);
+    // 裸仓库默认 HEAD 指向 master，而内容推到 main：修正 HEAD，
+    // 否则「检出远端 HEAD」的克隆会得到一个空工作区
+    await _git(
+      ['symbolic-ref', 'HEAD', 'refs/heads/main'],
+      Directory(remote),
+    );
     await _git(['remote', 'add', 'origin', remote], work);
     await _git(['push', '-u', 'origin', 'main'], work);
 

@@ -38,11 +38,10 @@ class GitSyncService {
     await waitForCleanup(targetPath);
     _prepareTarget(targetPath);
     final url = repo.cloneUrl;
-    final branch = repo.defaultBranch;
     final port = ReceivePort();
     final isolate = await Isolate.spawn(
       _cloneEntry,
-      <Object?>[url, branch, targetPath, port.sendPort],
+      <Object?>[url, targetPath, port.sendPort],
     );
     var ok = false;
     // true = 克隆 isolate 可能正停在 libgit2 原生代码里（传输进行中），
@@ -140,18 +139,23 @@ class GitSyncService {
   /// 原生异常对象不能跨 isolate 发送，这里统一转字符串。
   static void _cloneEntry(List<Object?> args) {
     final url = args[0] as String;
-    final branch = args[1] as String;
-    final path = args[2] as String;
-    final send = args[3] as SendPort;
+    final path = args[1] as String;
+    final send = args[2] as SendPort;
     try {
-      _cloneAt(url, branch, path, send);
+      _cloneAt(url, path, send);
       send.send(true);
     } on Object catch (e) {
       send.send('$e');
     }
   }
 
-  static void _cloneAt(String url, String branch, String path, SendPort send) {
+  /// 克隆到本地并检出远端 HEAD。
+  ///
+  /// 刻意不传 `checkoutBranch`：调用方对默认分支只能靠猜（以前猜 `main`，
+  /// 猜错——比如默认分支是 `master` 的仓库——libgit2 会报
+  /// `GIT_ERROR_REFERENCE`，随后整仓删掉重克隆，大仓库等于下载两遍）。
+  /// 不指定分支时 libgit2 直接检出远端 HEAD，一次到位。
+  static void _cloneAt(String url, String path, SendPort send) {
     final callbacks = Callbacks(
       transferProgress: (stats) => send.send(<Object?>[
         0,
@@ -160,28 +164,28 @@ class GitSyncService {
         stats.receivedBytes,
       ]),
     );
+    final r = Repository.clone(
+      url: url,
+      localPath: path,
+      callbacks: callbacks,
+    );
+    r.free();
+  }
+
+  /// 读取本地仓库当前分支名（克隆后写 meta 用；读不到返回 null）。
+  static String? readHeadBranch(String repoPath) {
     try {
-      final r = Repository.clone(
-        url: url,
-        localPath: path,
-        checkoutBranch: branch,
-        callbacks: callbacks,
-      );
-      r.free();
-    } on Object {
-      // fork 仓库的 default_branch 可能与实际分支不符
-      // （GIT_ERROR_REFERENCE: refs/remotes/origin/<branch> not found）。
-      // 回退为不指定分支：libgit2 检出远端 HEAD（真实默认分支）。
-      final dir = Directory(path);
-      if (dir.existsSync()) {
-        try {
-          dir.deleteSync(recursive: true);
-        } on Object {
-          // 删不掉时第二遍克隆会因目录存在失败，错误沿 port 回传
-        }
+      final repo = Repository.open(repoPath);
+      try {
+        final head = repo.head;
+        final name = head.name;
+        head.free();
+        return name.replaceFirst('refs/heads/', '');
+      } finally {
+        repo.free();
       }
-      final r = Repository.clone(url: url, localPath: path);
-      r.free();
+    } on Object {
+      return null;
     }
   }
 

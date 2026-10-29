@@ -1184,10 +1184,11 @@ class _HomePageState extends State<HomePage> {
         cancelToken: cancelToken,
       );
       final root = await _reposRoot;
+      final clonePath = '${root.path}${Platform.pathSeparator}$name';
       RepoMeta.writeClone(
-        '${root.path}${Platform.pathSeparator}$name',
+        clonePath,
         url: url,
-        branch: info.defaultBranch,
+        branch: GitSyncService.readHeadBranch(clonePath),
       );
       await _loadRepos();
       closeBusy();
@@ -2492,7 +2493,7 @@ class _RepoPageState extends State<RepoPage> {
       RepoMeta.writeClone(
         widget.repoDir.path,
         url: url,
-        branch: info.defaultBranch,
+        branch: GitSyncService.readHeadBranch(widget.repoDir.path),
       );
       await _refresh();
     } on Exception catch (e) {

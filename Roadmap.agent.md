@@ -85,15 +85,24 @@
 - *验收*：1000 行源码能跳到函数；两个中文词能收窄结果；AND 与排序有单测。
   （9 个提取用例 + 3 个查看器用例 + 检索 AND/排序用例）
 
-### 阶段 5 · 工程与平台（持续，不单独排期）
+### 阶段 5 · 工程与平台（P0，约 1 周）
 
-- [ ] **5.1 依赖升级**：当前 22 个包有更新，minor 批量升 + 全测，major 单独评估。
-- [ ] **5.2 补测试**：`global_search_page`、`settings_page`、`app_prefs`
-  （随改动补，不为覆盖率而补）。
-- [ ] **5.3 拆巨石**：`markdown_viewer.dart` 3013 行、`home_page.dart` 2358 行，
-  在动到对应功能时顺手拆成 `render/` 与 `page/`，不单独立项。
-- [ ] **5.4 任意 git 托管**：完整 URL 已能克隆，补 GitLab / 自建 Gitea 的平台识别与来源展示。
-- [ ] **5.5 iOS**：没有 Mac 硬件，冻结；恢复条件是真机 + macOS 环境。
+- [x] **5.1 克隆不猜分支**：`Repository.clone` 不再传 `checkoutBranch`（libgit2 检出远端
+  HEAD），删掉「删目录重克隆」的 fallback；克隆后用 `readHeadBranch` 把真实分支写进
+  meta。避免默认分支非 `main` 的仓库下载两遍。
+- [ ] **5.2 依赖治理**：保留 `shared_preferences 2.3.2` 的锁（2.5.x 的 Pigeon/JNI 在部分
+  设备上 `getAll` 不返回，见 `c659292`）；删零引用的 `cupertino_icons`；升 `flutter_svg`；
+  `flutter pub upgrade` 解锁传递依赖。
+- [ ] **5.3 测试补齐**（按数据完整性排序）：`markdown_editor`、`app_prefs`、`dir_size`、
+  `pull_progress`、`global_search_page`（历史/过滤/仅标题）、`storage_page`。
+- [ ] **5.4 拆巨石**：`markdown_viewer.dart` 3308 行、`home_page.dart` 2634 行——先搬纯
+  函数、再搬独立渲染组件、最后拆 `RepoPage` 与阅读页控制器；目标 <1500 / <1200 行。
+- [ ] **5.5 平台与 CI**：删掉无人调用的四个平台 adapter + factory（克隆只依赖 URL）；
+  `guessPlatform` 补 GitLab 与通用「其他」；剪贴板识别放宽到任意仓库 URL；CI 增加
+  `flutter build apk --debug` job，挡 Android 清单/插件回归。
+- [ ] **5.6 iOS**：没有 Mac 硬件，冻结；只记录恢复条件（macOS + 真机 + 备选图标 API 验证）。
+- *验收*：每项独立提交；analyze + 全量测试全绿；5.5 后 CI 的构建 job 能跑通；
+  阶段结束发 1.11.0。
 
 ## 四、候选池（不排期）
 
@@ -112,3 +121,7 @@
 
 每完成一个阶段合入 main 并发一个 minor（修复走 patch）；push / tag 前询问作者，
 Release 只经 GitHub Actions 由 tag 触发，不手动上传 APK。
+
+阶段 1–5 完成后发 **1.11.0**（2026-10 作者已确认），发版 = 改 `pubspec.yaml`
+version → 提交 → 打同名 tag 推送。
+

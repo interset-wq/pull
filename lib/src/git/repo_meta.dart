@@ -156,14 +156,18 @@ class RepoMeta {
     return v;
   }
 
+  /// 记录克隆来源。`branch` 传克隆后从 HEAD 读到的真实分支（读不到就不写），
+  /// 不再是调用方猜的默认分支。
   static void writeClone(
     String repoRoot, {
     required String url,
-    String branch = 'main',
+    String? branch,
   }) {
     final raw = _readRaw(repoRoot);
     raw['url'] = url;
-    raw['branch'] = branch;
+    if (branch != null && branch.isNotEmpty) {
+      raw['branch'] = branch;
+    }
     raw['syncedAt'] = DateTime.now().toIso8601String();
     _write(repoRoot, raw);
   }

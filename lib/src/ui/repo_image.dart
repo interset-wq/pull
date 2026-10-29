@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 
+import '../notes/ipynb_images.dart';
 import 'image_cache.dart';
 
 /// 统一图片加载：相对路径基于 [baseDir]（markdown 文件所在目录）解析，
@@ -27,7 +28,23 @@ Widget buildRepoImage(
 }) {
   final clean = url.trim();
   final Widget child;
-  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+  if (IpynbImageStore.isIpynbImage(clean)) {
+    // Notebook 富输出：图片在打开时已解码进内存，按内容哈希寻址
+    final bytes = IpynbImageStore.bytesFor(clean);
+    if (bytes == null) {
+      child = const _ImageErrorBox();
+    } else if (_looksLikeSvg(bytes)) {
+      child = SvgPicture.memory(bytes, fit: fit);
+    } else {
+      child = Image.memory(
+        bytes,
+        fit: fit,
+        cacheWidth: maxWidth,
+        frameBuilder: _fadeIn,
+        errorBuilder: (_, _, _) => const _ImageErrorBox(),
+      );
+    }
+  } else if (clean.startsWith('http://') || clean.startsWith('https://')) {
     child = _NetworkImage(url: clean, fit: fit, maxWidth: maxWidth);
   } else {
     child = Image.file(

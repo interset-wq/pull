@@ -42,10 +42,13 @@
   `AutoScrollTag`，标题记 `_headingSlots` 槽位。实测 5000 行首帧 2.3s→0.46s、
   10000 行 4.5s→0.8s，内存增量 261MB→7MB；代价是快速拖动掉帧率
   1~3%→约 33%（p95 约 20ms），见 `docs/perf.md` 的取舍一节。
-- [ ] **1.3 Notebook 富输出**：`image/png|jpeg` 真正显示（matplotlib 的 `<Figure ...>`
-  文本占位改为优先出图）、`text/html` 表格降级；`ipynb.dart` 目前零测试，一并补齐。
+- [x] **1.3 Notebook 富输出**：`image/png|jpeg|gif|svg` 解码后按内容哈希存内存
+  （`IpynbImageStore`，64MB 上限），正文只留 `pullread-ipynb://<hash>` 短引用；
+  有图时丢弃 matplotlib 的 `<Figure ...>` 占位；`text/html` 简单表格降级成
+  Markdown 表格（pandas），复杂表格回退 `text/plain`。`ipynb.dart` 补齐了
+  9 个单测 + 1 个渲染页 widget 测试。
 - *验收*：10k 行首帧明显改善，或给出「不改架构」的数据理由；notebook 图表可见；
-  既有测试仍全绿，并新增切块/转换的单测。（1.1/1.2 已验收，1.3 待做）
+  既有测试仍全绿，并新增切块/转换的单测。（阶段 1 全部完成）
 
 ### 阶段 2 · 同步闭环（P0，约 1 周半）
 

@@ -91,7 +91,8 @@ class RepoSearchService {
           File(note.absolutePath).readAsBytesSync(),
         );
         content = note.extension == '.ipynb'
-            ? IpynbConverter.toMarkdown(raw)
+            // 检索只要文字：跳过内嵌图片的解码与内存占用
+            ? IpynbConverter.toMarkdown(raw, includeImages: false)
             : raw;
       } on Object {
         // 读不了的文件跳过（权限/编码/正在写入）

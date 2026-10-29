@@ -74,6 +74,28 @@ void main() {
     expect(results, isEmpty);
   });
 
+  test('多词 AND：缺一个词就不返回', () {
+    write('a.md', 'flutter 状态 两个词');
+    write('b.md', '只有 flutter');
+    final results = RepoSearchService.searchSync(
+      repoRoot: root.path,
+      query: 'flutter 状态',
+    );
+    expect(results.map((r) => r.relativePath), ['a.md']);
+  });
+
+  test('路径命中全部关键词的排前面', () {
+    write('flutter-state.md', 'flutter state');
+    write('notes.md', 'flutter state flutter state');
+    final results = RepoSearchService.searchSync(
+      repoRoot: root.path,
+      query: 'flutter state',
+    );
+    expect(results.length, 2);
+    expect(results.first.relativePath, 'flutter-state.md',
+        reason: '标题同时命中两个词时优先，即使正文命中次数更少');
+  });
+
   test('空查询直接返回空，不做 IO', () {
     write('a.md', '内容');
     expect(

@@ -1,15 +1,26 @@
 /// 正文检索的纯逻辑（不碰文件系统，便于单测）：在单个文本里找命中、
 /// 统计次数、截取带上下文的摘要片段。
+///
+/// 查询按空白拆成多个词，**全部命中才算匹配（AND）**；摘要里每个词的
+/// 出现位置都给高亮区间，UI 不需要二次匹配。
 library;
 
-/// 一条命中摘要：命中所在行的截断文本 + 命中在片段内的偏移与长度
-/// （供 UI 高亮，避免二次匹配导致大小写不一致）。
+/// 摘要里的一段高亮区间。
+class SearchHighlight {
+  const SearchHighlight(this.start, this.length);
+
+  final int start;
+  final int length;
+
+  int get end => start + length;
+}
+
+/// 一条命中摘要：命中所在行的截断文本 + 命中在片段内的偏移与长度。
 class SearchSnippet {
   const SearchSnippet({
     required this.line,
     required this.text,
-    required this.matchStart,
-    required this.matchLength,
+    required this.highlights,
   });
 
   /// 命中所在行号（0 基）。
@@ -18,11 +29,8 @@ class SearchSnippet {
   /// 截断后的行文本（首尾可能带省略号）。
   final String text;
 
-  /// 命中在 [text] 中的起始下标。
-  final int matchStart;
-
-  /// 命中长度。
-  final int matchLength;
+  /// 该片段内所有命中词的区间（按起点升序，可能重叠）。
+  final List<SearchHighlight> highlights;
 }
 
 /// 单个文件的检索结果。
@@ -35,7 +43,7 @@ class FileSearchResult {
 
   final String relativePath;
 
-  /// 命中总次数（同一行多处会分别计数）。
+  /// 命中总次数（各词分别计数）。
   final int matches;
 
   /// 最多 [maxSnippets] 条摘要，按出现顺序。
@@ -45,43 +53,69 @@ class FileSearchResult {
 /// 摘要最长字符数：太长会把列表撑爆，太短又看不出上下文。
 const int _snippetMaxChars = 100;
 
+/// 长行截断时命中前的上下文宽度。
+const int _snippetContext = 30;
+
 /// 在 [content] 中检索 [query]（大小写不敏感，中文按原文直接匹配）。
 ///
-/// 没有命中返回 null。命中行去重后最多取 [maxSnippets] 条摘要，
-/// 但 [FileSearchResult.matches] 统计所有命中。
+/// 查询按空白拆词；任何一个词没出现就返回 null。命中行去重后最多取
+/// [maxSnippets] 条摘要，但 [FileSearchResult.matches] 统计所有命中。
 FileSearchResult? searchInText({
   required String relativePath,
   required String content,
   required String query,
   int maxSnippets = 3,
 }) {
-  final q = query.trim();
-  if (q.isEmpty || content.isEmpty) return null;
-  final needle = q.toLowerCase();
+  final terms = splitSearchTerms(query);
+  if (terms.isEmpty || content.isEmpty) return null;
   final haystack = content.toLowerCase();
   final lineStarts = _lineStarts(content);
-  final snippets = <SearchSnippet>[];
-  var matches = 0;
-  var from = 0;
-  while (from <= haystack.length - needle.length) {
-    final at = haystack.indexOf(needle, from);
-    if (at < 0) break;
-    matches++;
-    final line = _lineOf(lineStarts, at);
-    if (snippets.length < maxSnippets &&
-        !snippets.any((s) => s.line == line)) {
-      snippets.add(_snippetAt(content, lineStarts, line, at, needle.length));
+
+  // 每个词的全部命中；任何一个词没出现即整体不匹配
+  final occurrences = <({int start, int length})>[];
+  for (final term in terms) {
+    final hits = <int>[];
+    var from = 0;
+    while (from <= haystack.length - term.length) {
+      final at = haystack.indexOf(term, from);
+      if (at < 0) break;
+      hits.add(at);
+      from = at + term.length;
     }
-    // 按命中长度前进：同一处不重复计数（"aa" 里找 "aa" 是 1 次）
-    from = at + needle.length;
+    if (hits.isEmpty) return null;
+    for (final at in hits) {
+      occurrences.add((start: at, length: term.length));
+    }
   }
-  if (matches == 0) return null;
+
+  // 行 → 该行的命中区间（升序）
+  final byLine = <int, List<({int start, int length})>>{};
+  for (final occ in occurrences) {
+    final line = _lineOf(lineStarts, occ.start);
+    (byLine[line] ??= <({int start, int length})>[]).add(occ);
+  }
+  final lines = byLine.keys.toList()..sort();
+  final snippets = <SearchSnippet>[];
+  for (final line in lines) {
+    if (snippets.length >= maxSnippets) break;
+    final hits = byLine[line]!..sort((a, b) => a.start.compareTo(b.start));
+    snippets.add(_snippetAt(content, lineStarts, line, hits));
+  }
+
   return FileSearchResult(
     relativePath: relativePath,
-    matches: matches,
+    matches: occurrences.length,
     snippets: snippets,
   );
 }
+
+/// 把查询拆成小写词（空白分隔，含全角空格）。
+List<String> splitSearchTerms(String query) => query
+    .trim()
+    .toLowerCase()
+    .split(RegExp(r'[\s\u3000]+'))
+    .where((t) => t.isNotEmpty)
+    .toList();
 
 /// 文内查找的一处命中。
 class TextMatch {
@@ -104,7 +138,8 @@ class TextMatch {
 /// 找出 [text] 中 [query] 的全部命中（大小写不敏感、按出现顺序）。
 ///
 /// 供阅读页「文内查找」使用：命中按行号返回，调用方再按 TOC 的
-/// `TocEntry.line` 定位到所在章节滚动。
+/// `TocEntry.line` 定位到所在章节滚动。文内查找刻意不支持多词 AND——
+/// 它要的是「定位这个词」，多词反而找不到用户要找的那一处。
 List<TextMatch> findTextMatches(String text, String query) {
   final q = query.trim();
   if (q.isEmpty || text.isEmpty) return const [];
@@ -164,28 +199,61 @@ int _lineOf(List<int> starts, int offset) {
   return lo;
 }
 
+/// 以该行首个命中为中心截取片段，并收集片段内所有命中词的区间。
 SearchSnippet _snippetAt(
   String content,
   List<int> starts,
   int line,
-  int matchAt,
-  int matchLength,
+  List<({int start, int length})> hits,
 ) {
   final lineStart = starts[line];
   final raw = _lineText(content, starts, line);
-  final matchInLine = matchAt - lineStart;
+  final firstHit = hits.first;
 
-  // 行太长时围绕命中位置截断，保证命中一定落在片段里
+  List<SearchHighlight> inRange(
+    int from,
+    int to,
+    int shift,
+    int textLength,
+  ) {
+    final out = <SearchHighlight>[];
+    for (final hit in hits) {
+      if (hit.start < from || hit.start >= to) continue;
+      var start = hit.start - from + shift;
+      var length = hit.length;
+      if (start < 0) {
+        length += start;
+        start = 0;
+      }
+      if (length <= 0) continue;
+      if (start + length > textLength) {
+        length = textLength - start;
+      }
+      if (length <= 0) continue;
+      out.add(SearchHighlight(start, length));
+    }
+    return out;
+  }
+
+  // 短行：整行展示，去掉左侧缩进并把高亮区间一起平移
   if (raw.length <= _snippetMaxChars) {
+    final trimmed = raw.trimLeft();
+    final shift = raw.length - trimmed.length;
     return SearchSnippet(
       line: line,
-      text: raw.trimLeft(),
-      matchStart: matchInLine - (raw.length - raw.trimLeft().length),
-      matchLength: matchLength,
+      text: trimmed,
+      highlights: inRange(
+        lineStart + shift,
+        lineStart + raw.length,
+        -shift,
+        trimmed.length,
+      ),
     );
   }
-  const context = 30;
-  var begin = matchInLine - context;
+
+  // 长行：围绕首个命中截断
+  final matchInLine = firstHit.start - lineStart;
+  var begin = matchInLine - _snippetContext;
   if (begin < 0) begin = 0;
   var end = begin + _snippetMaxChars;
   if (end > raw.length) {
@@ -199,7 +267,11 @@ SearchSnippet _snippetAt(
   return SearchSnippet(
     line: line,
     text: '$prefix$cut$suffix',
-    matchStart: prefix.length + (matchInLine - begin),
-    matchLength: matchLength,
+    highlights: inRange(
+      lineStart + begin,
+      lineStart + end,
+      prefix.length,
+      prefix.length + cut.length + suffix.length,
+    ),
   );
 }

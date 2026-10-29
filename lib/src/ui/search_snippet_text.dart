@@ -4,8 +4,8 @@ import '../search/text_search.dart';
 
 /// 检索摘要的统一样式：命中处用主题色底 + 加粗高亮。
 ///
-/// 偏移由检索层给出（[SearchSnippet.matchStart]/[matchLength]），
-/// 这里不做二次匹配，避免大小写/编码差异导致高亮错位。
+/// 偏移由检索层给出（[SearchSnippet.highlights]），这里不做二次匹配，
+/// 避免大小写/编码差异导致高亮错位；多词检索时一段摘要里可能有多处。
 class SearchSnippetText extends StatelessWidget {
   const SearchSnippetText({
     required this.snippet,
@@ -29,20 +29,26 @@ class SearchSnippetText extends StatelessWidget {
       fontWeight: FontWeight.w600,
     );
     final text = snippet.text;
-    final start = snippet.matchStart.clamp(0, text.length).toInt();
-    final end =
-        (snippet.matchStart + snippet.matchLength).clamp(start, text.length)
-            .toInt();
+    final highlights = [...snippet.highlights]
+      ..sort((a, b) => a.start.compareTo(b.start));
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    for (final highlight in highlights) {
+      final start = highlight.start.clamp(0, text.length);
+      final end = (highlight.start + highlight.length).clamp(start, text.length);
+      // 重叠区间（例如同时搜 "ab" 与 "bc"）只保留第一段，避免样式打架
+      if (start < cursor || end <= start) continue;
+      if (start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, start), style: base));
+      }
+      spans.add(TextSpan(text: text.substring(start, end), style: hit));
+      cursor = end;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor), style: base));
+    }
     return Text.rich(
-      TextSpan(
-        children: [
-          if (start > 0) TextSpan(text: text.substring(0, start), style: base),
-          if (end > start)
-            TextSpan(text: text.substring(start, end), style: hit),
-          if (end < text.length)
-            TextSpan(text: text.substring(end), style: base),
-        ],
-      ),
+      TextSpan(children: spans),
       maxLines: maxLines,
       overflow: TextOverflow.ellipsis,
     );

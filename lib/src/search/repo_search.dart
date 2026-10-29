@@ -62,10 +62,11 @@ class RepoSearchService {
         NoteScanner(useDefaults: useDefaults, customRules: customRules)
             .scan(repoRoot);
     final results = <FileSearchResult>[];
+    final terms = splitSearchTerms(q);
     if (titleOnly) {
-      final needle = q.toLowerCase();
       for (final note in candidates) {
-        if (note.relativePath.toLowerCase().contains(needle)) {
+        final path = note.relativePath.toLowerCase();
+        if (terms.every(path.contains)) {
           results.add(
             FileSearchResult(
               relativePath: note.relativePath,
@@ -106,6 +107,11 @@ class RepoSearchService {
       if (hit != null) results.add(hit);
     }
     results.sort((a, b) {
+      // 标题/路径里命中全部关键词的排前面：搜「flutter 状态」时，
+      // flutter-state.md 比正文里凑巧出现两词的长文更可能是目标。
+      final rankA = _titleRank(a.relativePath, terms);
+      final rankB = _titleRank(b.relativePath, terms);
+      if (rankA != rankB) return rankA.compareTo(rankB);
       final byCount = b.matches.compareTo(a.matches);
       return byCount != 0
           ? byCount
@@ -123,4 +129,10 @@ class RepoSearchService {
       note.extension == '.mdx' ||
       note.extension == '.ipynb' ||
       note.extension == '.txt';
+
+  /// 0 = 路径里包含全部关键词（排序优先级最高）。
+  static int _titleRank(String relativePath, List<String> terms) {
+    final path = relativePath.toLowerCase();
+    return terms.every(path.contains) ? 0 : 1;
+  }
 }

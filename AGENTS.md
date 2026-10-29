@@ -51,7 +51,10 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   `.pullread_pending.json`（`.pullread_manifest.json` 旁）：之后的增量
   同步会**跳过**这些文件并自动重试写回，绝不拿源侧旧内容覆盖镜像——
   设置页「数据 → 未写回的修改」可查看明细、重试或以镜像为准强制覆盖。
-- **代码查看**：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）
+- **代码查看**（`lib/src/ui/code_viewer.dart` + `lib/src/notes/code_outline.dart`）：非 Markdown 文件用语法高亮只读查看（对标 GitHub mobile，并补其痛点：无 TOC、不支持 notebook）。
+  - **大纲**：正则启发式抽 `class/mixin/enum/extension`、`def`、`function/const 箭头函数`、`fun`、`func`、`fn`、shell 函数与 `# 注释分节`、yaml 顶层键等，最多 500 条；面板可跳行（`_currentLine` 按滚动位置反算并高亮当前条目，跳转按固定行高 19.5 估算偏移）。
+  - **文内查找**：复用 `findTextMatches`，查找条显示命中计数与上一处/下一处；**不做逐字高亮**（HighlightView 内部不暴露文本偏移）。
+  - **自动换行**：开关在 AppBar，开启后隐藏行号列（折行后行号对不齐），长行不再只能横向拖。
 - **目录扫描与缓存**（`lib/src/notes/note_index.dart`）：仓库文件列表在后台
   isolate 扫描（UI 线程不做递归 `listSync`，大仓库不卡首帧），结果缓存到
   `<reposRoot>/.meta/index/<仓库名>.json`；进入仓库页先用缓存渲染、再后台
@@ -62,8 +65,9 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   历史标签点击即搜、✕ 删除）、**按仓库过滤**（多选仓库标签，未选 = 全部）、
   「正文 / 仅标题」两种模式（仅标题只匹配文件名/路径，不读文件内容，
   打开命中不带查找词）。正文检索在 isolate 内读 md/ipynb/txt（单文件
-  ≤2MB）做线性匹配，返回命中次数 + 上下文摘要（带命中偏移供
-  `SearchSnippetText` 高亮）。**刻意不建倒排索引**：中文 2-gram 的 postings
+  ≤2MB）做线性匹配：查询按空白（含全角空格）拆词，**全部命中才返回（AND）**，
+  摘要用 `SearchSnippet.highlights` 给每个词各自的区间（UI 直接按偏移上色）；
+  排序为「路径命中全部关键词 → 命中次数 → 路径」。**刻意不建倒排索引**：中文 2-gram 的 postings
   条目数与正文字符数同量级，序列化后往往比正文本身还大，而笔记仓库正文只有
   几 MB，页缓存 + `indexOf` 足够快且无索引过期问题。
 - **文内查找**（`lib/src/ui/markdown_viewer.dart` + `findTextMatches`）：阅读页

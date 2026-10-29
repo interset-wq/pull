@@ -58,10 +58,8 @@ void main() {
       expect(r!.matches, 10);
       expect(r.snippets.length, 2);
       for (final s in r.snippets) {
-        expect(
-          s.text.substring(s.matchStart, s.matchStart + s.matchLength),
-          '关键词',
-        );
+        final h = s.highlights.single;
+        expect(s.text.substring(h.start, h.start + h.length), '关键词');
       }
     });
 
@@ -76,10 +74,8 @@ void main() {
       );
       final s = r!.snippets.single;
       expect(s.text.length, lessThan(120));
-      expect(
-        s.text.substring(s.matchStart, s.matchStart + s.matchLength),
-        '关键词',
-      );
+      final h = s.highlights.single;
+      expect(s.text.substring(h.start, h.start + h.length), '关键词');
     });
 
     test('CRLF 行尾不影响片段与行号', () {
@@ -90,6 +86,55 @@ void main() {
       );
       expect(r!.snippets.single.line, 1);
       expect(r.snippets.single.text.contains('\r'), isFalse);
+    });
+  });
+
+  group('多词 AND 检索', () {
+    test('所有词都出现才算匹配', () {
+      final hit = searchInText(
+        relativePath: 'a',
+        content: 'flutter 状态 管理',
+        query: 'flutter 管理',
+      );
+      expect(hit, isNotNull);
+      expect(hit!.matches, 2);
+      expect(
+        searchInText(
+          relativePath: 'a',
+          content: '只有 flutter',
+          query: 'flutter 管理',
+        ),
+        isNull,
+      );
+    });
+
+    test('摘要里每个词都有高亮区间', () {
+      final r = searchInText(
+        relativePath: 'a',
+        content: '第一行 flutter 与 状态',
+        query: 'flutter 状态',
+      );
+      final snippet = r!.snippets.single;
+      final words = snippet.highlights
+          .map((h) => snippet.text.substring(h.start, h.start + h.length))
+          .toList();
+      expect(words, containsAll(['flutter', '状态']));
+    });
+
+    test('全角空格与大小写', () {
+      final r = searchInText(
+        relativePath: 'a',
+        content: 'Flutter　状态',
+        query: 'FLUTTER　状态',
+      );
+      expect(r, isNotNull);
+      expect(r!.matches, 2);
+    });
+
+    test('拆分查询词的纯函数', () {
+      expect(splitSearchTerms('  Flutter  状态　管理 '),
+          ['flutter', '状态', '管理']);
+      expect(splitSearchTerms('   '), isEmpty);
     });
   });
 

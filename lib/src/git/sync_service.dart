@@ -22,6 +22,10 @@ class GitSyncService {
   /// [onProgress] 在对象传输阶段被回调（对象数/字节）；[cancelToken.cancel()]
   /// 后下一条进度消息到达时即终止克隆并清理目录（传输是阻塞原生调用，
   /// 取消只能借下一次进度回调生效）。
+  /// 按目录记录在途的「优雅终止清理」：取消/超时后孤儿 isolate 仍会在
+  /// 原生侧把克隆跑完，目录要等 isolate 退出才能删。
+  static final Map<String, Future<void>> _gracefulCleanups = {};
+
   Future<String> clone({
     required RepoInfo repo,
     required Directory parentDir,
@@ -29,6 +33,9 @@ class GitSyncService {
     CloneCancelToken? cancelToken,
   }) async {
     final targetPath = '${parentDir.path}${Platform.pathSeparator}${repo.name}';
+    // 上一次被取消/超时的克隆若还在原生代码里跑，等它退出并清理完目录，
+    // 否则重试会在半成品/已完成目录上误报「本地目录已存在」
+    await waitForCleanup(targetPath);
     _prepareTarget(targetPath);
     final url = repo.cloneUrl;
     final branch = repo.defaultBranch;
@@ -38,6 +45,9 @@ class GitSyncService {
       <Object?>[url, branch, targetPath, port.sendPort],
     );
     var ok = false;
+    // true = 克隆 isolate 可能正停在 libgit2 原生代码里（传输进行中），
+    // 不能用 immediate kill 打断，否则进程崩溃（app 直接退出）
+    var inNative = false;
     try {
       // 进度消息为 [0, received, total, bytes]；最终消息 true / 错误字符串
       await for (final msg in port.timeout(const Duration(minutes: 5))) {
@@ -50,6 +60,7 @@ class GitSyncService {
             ),
           );
           if (cancelToken?.isCancelled ?? false) {
+            inNative = true;
             throw const SyncException('已取消克隆');
           }
           continue;
@@ -63,7 +74,8 @@ class GitSyncService {
       if (!ok) throw const SyncException('克隆失败：连接中断');
       return targetPath;
     } on TimeoutException {
-      isolate.kill(priority: Isolate.immediate);
+      // 超时同样发生在原生克隆阻塞期间，走优雅终止
+      inNative = true;
       throw const SyncException(
         '克隆超时（5 分钟）：网络过慢或仓库过大，请重试',
       );
@@ -74,9 +86,52 @@ class GitSyncService {
     } finally {
       port.close();
       if (!ok) {
-        isolate.kill(priority: Isolate.immediate);
-        // 被杀掉的 isolate 可能还占着文件句柄（Windows 尤甚），重试几次
-        await _removeDir(targetPath);
+        if (inNative) {
+          // 优雅终止：kill 请求推迟到 isolate 下次响应事件时生效
+          // （原生克隆自然返回后），目录清理等 isolate 真正退出后再做，
+          // 避免与仍在写盘的克隆抢文件句柄。登记在案供重试方等待。
+          final cleanup = _shutdownGracefully(isolate, targetPath);
+          _gracefulCleanups[targetPath] = cleanup;
+          unawaited(cleanup);
+        } else {
+          isolate.kill(priority: Isolate.immediate);
+          // 被杀掉的 isolate 可能还占着文件句柄（Windows 尤甚），重试几次
+          await _removeDir(targetPath);
+        }
+      }
+    }
+  }
+
+  /// 等待 [targetPath] 上一次被取消/超时克隆的孤儿 isolate 退出并清理完目录。
+  ///
+  /// 传输期间 isolate 停在 libgit2 原生代码里，`Isolate.immediate` 会打断
+  /// 原生执行并崩溃进程（用户点取消后 app 直接退出就是这个原因）；
+  /// 这里先挂退出监听、再发 `beforeNextEvent` 的 kill 请求兜底（若克隆
+  /// 永久卡死也能最终终止），等 isolate 真正退出后清理半成品目录。
+  static Future<void> _shutdownGracefully(Isolate isolate, String path) async {
+    final exited = Completer<void>();
+    final exitPort = RawReceivePort((_) => exited.complete());
+    try {
+      isolate.addOnExitListener(exitPort.sendPort);
+      isolate.kill(priority: Isolate.beforeNextEvent);
+      await exited.future;
+    } finally {
+      exitPort.close();
+    }
+    await _removeDir(path);
+  }
+
+  /// 等待某目录上一次被取消/超时克隆的孤儿 isolate 退出并完成目录清理。
+  ///
+  /// UI 在取消克隆后调用它再刷新仓库列表，避免展示半成品目录；
+  /// 重试克隆也会在开始前隐式等待。
+  static Future<void> waitForCleanup(String targetPath) async {
+    final prev = _gracefulCleanups.remove(targetPath);
+    if (prev != null) {
+      try {
+        await prev;
+      } on Object {
+        // 清理失败（句柄占用等）：下次 clone 的 _prepareTarget 还会兜底
       }
     }
   }

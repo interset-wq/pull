@@ -965,6 +965,20 @@ class _HomePageState extends State<HomePage> {
           ),
         );
       }
+      if (e.message == '已取消克隆') {
+        // 孤儿 isolate 会在原生克隆自然返回后退出；在后台等它清理完
+        // 半成品目录再刷新列表，不阻塞 UI（加号按钮由 finally 立即复位，
+        // 重试克隆前 clone() 也会隐式等待清理完成）
+        unawaited(
+          () async {
+            final root = await _reposRoot;
+            await GitSyncService.waitForCleanup(
+              '${root.path}${Platform.pathSeparator}$name',
+            );
+            if (mounted) await _loadRepos();
+          }(),
+        );
+      }
     } on Exception catch (e) {
       closeBusy();
       if (mounted) {

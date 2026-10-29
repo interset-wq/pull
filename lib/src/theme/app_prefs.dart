@@ -42,6 +42,7 @@ class AppPrefs extends ChangeNotifier {
   static const _detailsExpandedKey = 'detailsExpanded';
   static const _silentPullKey = 'silentPull';
   static const _treeModeKey = 'treeMode';
+  static const _searchHistoryKey = 'searchHistory';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -116,6 +117,40 @@ class AppPrefs extends ChangeNotifier {
   bool? _silentPull;
   bool get silentPull => _silentPull ?? false;
 
+  List<String> _searchHistory = const [];
+  List<String> get searchHistory => _searchHistory;
+
+  /// 记录一次搜索（去重、最新的在最前，最多 12 条）。
+  Future<void> addSearchHistory(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    final next = [q, ..._searchHistory.where((e) => e != q)];
+    if (next.length > 12) next.removeRange(12, next.length);
+    _searchHistory = next;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setStringList(_searchHistoryKey, next);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
+  /// 删除一条搜索历史（长按历史标签）。
+  Future<void> removeSearchHistory(String query) async {
+    if (!_searchHistory.contains(query)) return;
+    _searchHistory = List.of(_searchHistory)..remove(query);
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setStringList(_searchHistoryKey, _searchHistory);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
   // 仓库页目录树模式：目录就地展开/折叠。默认关闭——经典模式（点目录
   // 进入下一页，类似文件资源管理器）才是主要导航方式，树模式下目录
   // 没有独立路由，指向目录的本地链接无法跳转
@@ -153,6 +188,7 @@ class AppPrefs extends ChangeNotifier {
     var detailsExpanded = true;
     var silentPull = false;
     var treeMode = false;
+    var searchHistory = const <String>[];
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -190,6 +226,7 @@ class AppPrefs extends ChangeNotifier {
       detailsExpanded = sp.getBool(_detailsExpandedKey) ?? true;
       silentPull = sp.getBool(_silentPullKey) ?? false;
       treeMode = sp.getBool(_treeModeKey) ?? false;
+      searchHistory = sp.getStringList(_searchHistoryKey) ?? const <String>[];
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -214,6 +251,7 @@ class AppPrefs extends ChangeNotifier {
     prefs._detailsExpanded = detailsExpanded;
     prefs._silentPull = silentPull;
     prefs._treeMode = treeMode;
+    prefs._searchHistory = searchHistory;
     return _instance = prefs;
   }
 

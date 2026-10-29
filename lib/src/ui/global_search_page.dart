@@ -6,13 +6,15 @@ import 'package:flutter/material.dart';
 import '../notes/note_scanner.dart';
 import '../search/repo_search.dart';
 import '../search/text_search.dart';
+import '../theme/app_prefs.dart';
 import 'markdown_viewer.dart';
 import 'search_snippet_text.dart';
 
-/// 跨仓库正文搜索页：逐个仓库检索、结果按仓库分组流式出现。
+/// 跨仓库搜索页：逐个仓库检索、结果按仓库分组流式出现。
 ///
 /// 单个仓库的检索由 [RepoSearchService] 在 isolate 内完成；这里顺序遍历
-/// 所有仓库，避免同时开一堆 isolate 抢 CPU。
+/// 选中的仓库，避免同时开一堆 isolate 抢 CPU。
+/// 支持搜索历史（本地持久化）、按仓库过滤、「仅标题 / 仅正文」两种模式。
 class GlobalSearchPage extends StatefulWidget {
   const GlobalSearchPage({required this.repos, super.key});
 
@@ -27,8 +29,12 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
   Timer? _debounce;
   String _query = '';
   bool _searching = false;
+  bool _titleOnly = false;
   int _seq = 0;
   List<_GlobalHit> _hits = const [];
+
+  /// 选中的仓库名集合；空 = 全部仓库。
+  Set<String> _selectedRepos = {};
 
   @override
   void dispose() {
@@ -52,25 +58,36 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
     _debounce = Timer(const Duration(milliseconds: 400), () => _run(q));
   }
 
+  /// 仓库在当前过滤范围（全部 / 勾选集合）内才参与检索。
+  bool _inScope(Directory repo) {
+    if (_selectedRepos.isEmpty) return true;
+    return _selectedRepos.contains(_repoName(repo));
+  }
+
+  String _repoName(Directory repo) =>
+      repo.path.split(Platform.pathSeparator).last;
+
   Future<void> _run(String query) async {
     final seq = ++_seq;
+    unawaited(AppPrefs.instance?.addSearchHistory(query));
     final merged = <_GlobalHit>[];
     for (final repo in widget.repos) {
+      if (!_inScope(repo)) continue;
       if (!mounted || seq != _seq) return;
       List<FileSearchResult> hits;
       try {
         hits = await RepoSearchService.search(
           repoRoot: repo.path,
           query: query,
+          titleOnly: _titleOnly,
         );
       } on Object {
         hits = const [];
       }
       if (!mounted || seq != _seq) return;
-      final repoName = repo.path.split(Platform.pathSeparator).last;
       merged.addAll([
         for (final hit in hits)
-          _GlobalHit(repo: repo, repoName: repoName, result: hit),
+          _GlobalHit(repo: repo, repoName: _repoName(repo), result: hit),
       ]);
       // 逐仓库更新：先搜完的仓库先出结果，不必等全部结束
       setState(() => _hits = List.of(merged));
@@ -87,9 +104,9 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
           controller: _controller,
           autofocus: true,
           textInputAction: TextInputAction.search,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             border: InputBorder.none,
-            hintText: '搜索全部仓库的正文',
+            hintText: _titleOnly ? '按文件名搜索全部仓库' : '搜索全部仓库的正文',
           ),
           onChanged: _onChanged,
         ),
@@ -104,26 +121,140 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
               },
             ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Row(
+              children: [
+                // 「仅标题 / 仅正文」模式切换
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('正文')),
+                    ButtonSegment(value: true, label: Text('仅标题')),
+                  ],
+                  selected: {_titleOnly},
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onSelectionChanged: (selection) {
+                    setState(() {
+                      _titleOnly = selection.first;
+                      _hits = const [];
+                    });
+                    if (_query.length >= 2) {
+                      setState(() => _searching = true);
+                      _debounce?.cancel();
+                      _debounce = Timer(
+                        const Duration(milliseconds: 200),
+                        () => _run(_query),
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: _repoFilterChips(theme)),
+              ],
+            ),
+          ),
+        ),
       ),
       body: _buildBody(theme),
     );
   }
 
+  /// 仓库过滤：横向滚动的筛选标签，未选任何仓库 = 搜全部。
+  Widget _repoFilterChips(ThemeData theme) {
+    if (widget.repos.length < 2) return const SizedBox.shrink();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          FilterChip(
+            label: const Text('全部'),
+            selected: _selectedRepos.isEmpty,
+            showCheckmark: false,
+            visualDensity: VisualDensity.compact,
+            onSelected: (_) => setState(() => _selectedRepos = {}),
+          ),
+          for (final repo in widget.repos)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: FilterChip(
+                label: Text(_repoName(repo)),
+                selected: _selectedRepos.contains(_repoName(repo)),
+                showCheckmark: false,
+                visualDensity: VisualDensity.compact,
+                onSelected: (selected) => setState(() {
+                  final next = Set.of(_selectedRepos);
+                  selected
+                      ? next.add(_repoName(repo))
+                      : next.remove(_repoName(repo));
+                  _selectedRepos = next;
+                }),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBody(ThemeData theme) {
     if (_query.length < 2) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            widget.repos.isEmpty
-                ? '还没有克隆任何仓库'
-                : '在 ${widget.repos.length} 个仓库的正文中搜索（至少 2 个字符）',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
+      final history = AppPrefs.instance?.searchHistory ?? const <String>[];
+      if (history.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              widget.repos.isEmpty
+                  ? '还没有克隆任何仓库'
+                  : '在 ${widget.repos.length} 个仓库中搜索（至少 2 个字符）',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        );
+      }
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          Text(
+            '搜索历史',
+            style: theme.textTheme.labelLarge?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-        ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final item in history)
+                InputChip(
+                  label: Text(item),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    _controller.text = item;
+                    _onChanged(item);
+                  },
+                  onDeleted: () =>
+                      AppPrefs.instance?.removeSearchHistory(item),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '点击历史词直接搜索，长按 ✕ 删除',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       );
     }
     if (_hits.isEmpty) {
@@ -131,16 +262,20 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
         child: _searching
             ? const CircularProgressIndicator()
             : Text(
-                '没有匹配的正文',
+                _titleOnly ? '没有匹配的文件名' : '没有匹配的正文',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
       );
     }
+    final visible = _hits
+        .where((hit) => _selectedRepos.isEmpty ||
+            _selectedRepos.contains(hit.repoName))
+        .toList();
     final items = <Widget>[];
     String? lastRepo;
-    for (final hit in _hits) {
+    for (final hit in visible) {
       if (hit.repoName != lastRepo) {
         lastRepo = hit.repoName;
         items.add(
@@ -187,12 +322,13 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
               style: theme.textTheme.bodyMedium,
             ),
           ),
-          Text(
-            '${result.matches} 处',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.primary,
+          if (!_titleOnly)
+            Text(
+              '${result.matches} 处',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
             ),
-          ),
         ],
       ),
       subtitle: Column(
@@ -236,8 +372,8 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
             sizeBytes: stat.size,
           ),
           repoRoot: hit.repo.path,
-          // 带着检索词进阅读页：自动打开查找条并定位到第一处命中
-          initialFindQuery: _query,
+          // 带着检索词进阅读页：自动打开查找条并定位到第一处命中（仅标题模式没有正文命中，不带）
+          initialFindQuery: _titleOnly ? null : _query,
         ),
       ),
     );

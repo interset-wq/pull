@@ -23,12 +23,15 @@ class RepoSearchService {
   ///
   /// [files] 传入已扫描好的列表可复用仓库页缓存；为 null 时在 isolate
   /// 内自行扫描（遵守同一套 ignore 规则）。
+  /// [titleOnly] 为 true 时只按文件名/路径匹配，不读文件内容（快得多，
+  /// 命中不含摘要，仅作为文件清单过滤）。
   static Future<List<FileSearchResult>> search({
     required String repoRoot,
     required String query,
     List<NoteFile>? files,
     bool useDefaults = true,
     List<String> customRules = const [],
+    bool titleOnly = false,
   }) {
     final q = query.trim();
     if (q.isEmpty) return Future.value(const []);
@@ -39,6 +42,7 @@ class RepoSearchService {
         files: files,
         useDefaults: useDefaults,
         customRules: customRules,
+        titleOnly: titleOnly,
       ),
     );
   }
@@ -50,6 +54,7 @@ class RepoSearchService {
     List<NoteFile>? files,
     bool useDefaults = true,
     List<String> customRules = const [],
+    bool titleOnly = false,
   }) {
     final q = query.trim();
     if (q.isEmpty) return const [];
@@ -57,6 +62,25 @@ class RepoSearchService {
         NoteScanner(useDefaults: useDefaults, customRules: customRules)
             .scan(repoRoot);
     final results = <FileSearchResult>[];
+    if (titleOnly) {
+      final needle = q.toLowerCase();
+      for (final note in candidates) {
+        if (note.relativePath.toLowerCase().contains(needle)) {
+          results.add(
+            FileSearchResult(
+              relativePath: note.relativePath,
+              matches: 1,
+              snippets: const [],
+            ),
+          );
+        }
+      }
+      results.sort((a, b) => a.relativePath.compareTo(b.relativePath));
+      if (results.length > maxHitFiles) {
+        results.removeRange(maxHitFiles, results.length);
+      }
+      return results;
+    }
     for (final note in candidates) {
       if (!_isSearchable(note)) continue;
       final String content;

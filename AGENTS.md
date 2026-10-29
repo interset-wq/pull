@@ -55,7 +55,10 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   重扫校正（stale-while-revalidate）。删除仓库/本地文件夹时一并清理该缓存。
 - **正文检索**（`lib/src/search/`）：仓库页搜索框可切换「文件名 / 正文」；
   首页搜索图标进入 `lib/src/ui/global_search_page.dart` 跨仓库检索（逐仓库
-  顺序执行、结果流式分组）。正文检索在 isolate 内读 md/ipynb/txt（单文件
+  顺序执行、结果流式分组），支持**搜索历史**（AppPrefs 持久化，最多 12 条，
+  历史标签点击即搜、✕ 删除）、**按仓库过滤**（多选仓库标签，未选 = 全部）、
+  「正文 / 仅标题」两种模式（仅标题只匹配文件名/路径，不读文件内容，
+  打开命中不带查找词）。正文检索在 isolate 内读 md/ipynb/txt（单文件
   ≤2MB）做线性匹配，返回命中次数 + 上下文摘要（带命中偏移供
   `SearchSnippetText` 高亮）。**刻意不建倒排索引**：中文 2-gram 的 postings
   条目数与正文字符数同量级，序列化后往往比正文本身还大，而笔记仓库正文只有

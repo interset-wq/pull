@@ -22,10 +22,14 @@ class _TagPageState extends State<TagPage> {
   List<TaggedFile>? _files;
   String? _error;
   final Set<String> _selected = <String>{};
+  bool? _dirTags;
+
+  bool get _useDirTags => _dirTags ?? AppPrefs.instance?.dirTags ?? true;
 
   @override
   void initState() {
     super.initState();
+    _dirTags = AppPrefs.instance?.dirTags ?? true;
     _load();
   }
 
@@ -36,6 +40,7 @@ class _TagPageState extends State<TagPage> {
         widget.roots,
         useDefaults: prefs?.ignoreDefaults ?? true,
         customRules: prefs?.ignoreRules ?? const [],
+        includeDirTags: _useDirTags,
       );
       if (!mounted) return;
       setState(() => _files = files);
@@ -43,6 +48,18 @@ class _TagPageState extends State<TagPage> {
       if (!mounted) return;
       setState(() => _error = '$e');
     }
+  }
+
+  /// 切换「目录名当隐式标签」并重扫。
+  Future<void> _toggleDirTags() async {
+    final next = !_useDirTags;
+    setState(() {
+      _dirTags = next;
+      _files = null;
+      _selected.clear();
+    });
+    await AppPrefs.instance?.setDirTags(next);
+    await _load();
   }
 
   /// 标签 → 出现次数（按文件计），次数多的在前。
@@ -76,6 +93,13 @@ class _TagPageState extends State<TagPage> {
       appBar: AppBar(
         title: const Text('标签'),
         actions: [
+          IconButton(
+            tooltip: _useDirTags ? '目录名当标签：开' : '目录名当标签：关',
+            icon: Icon(
+              _useDirTags ? Icons.folder_special_outlined : Icons.folder_off_outlined,
+            ),
+            onPressed: _toggleDirTags,
+          ),
           if (_selected.isNotEmpty)
             TextButton(
               onPressed: () => setState(_selected.clear),
@@ -102,7 +126,9 @@ class _TagPageState extends State<TagPage> {
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Text(
-            '笔记的 front-matter 里没有 tags',
+            _useDirTags
+                ? '没有可用的标签'
+                : '笔记的 front-matter 里没有 tags；\n右上角可开启「目录名当标签」',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,

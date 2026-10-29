@@ -31,21 +31,27 @@ class TagIndex {
     List<Directory> roots, {
     bool useDefaults = true,
     List<String> customRules = const [],
+    bool includeDirTags = false,
   }) {
     return Isolate.run(
       () => scanSync(
         roots: roots,
         useDefaults: useDefaults,
         customRules: customRules,
+        includeDirTags: includeDirTags,
       ),
     );
   }
 
   /// 同步实现（isolate 入口，也便于单测）。
+  ///
+  /// [includeDirTags] 为 true 时，把文件的每级目录名并入 tags（隐式标签）：
+  /// 没写 front-matter 的仓库也能用标签页导航。与显式 tags 合并去重。
   static List<TaggedFile> scanSync({
     required List<Directory> roots,
     bool useDefaults = true,
     List<String> customRules = const [],
+    bool includeDirTags = false,
   }) {
     final out = <TaggedFile>[];
     for (final root in roots) {
@@ -57,18 +63,29 @@ class TagIndex {
       for (final file in files) {
         if (!_isMarkdownLike(file.extension)) continue;
         final tags = _readTags(file.absolutePath);
-        if (tags.isEmpty) continue;
+        final dirs = includeDirTags ? _dirSegments(file.relativePath) : const <String>[];
+        final merged = {...tags, ...dirs}.toList()..sort();
+        if (merged.isEmpty) continue;
         out.add(
           TaggedFile(
             repoRoot: root.path,
             repoName: repoName,
             relativePath: file.relativePath,
-            tags: tags,
+            tags: merged,
           ),
         );
       }
     }
     return out;
+  }
+
+  /// 相对路径的目录段（不含文件名），`/` 与 `\` 都按分隔符处理。
+  static List<String> _dirSegments(String relativePath) {
+    final parts = relativePath
+        .replaceAll('\\', '/')
+        .split('/')
+      ..removeLast();
+    return [for (final p in parts) if (p.isNotEmpty) p];
   }
 
   static bool _isMarkdownLike(String ext) =>

@@ -43,6 +43,7 @@ class AppPrefs extends ChangeNotifier {
   static const _silentPullKey = 'silentPull';
   static const _treeModeKey = 'treeMode';
   static const _searchHistoryKey = 'searchHistory';
+  static const _dirTagsKey = 'dirTags';
 
   /// 应用图标可选值（与 AndroidManifest activity-alias 对应）。
   static const kAppIconKeys = ['book', 'page', 'arrow', 'converge', 'tray'];
@@ -120,6 +121,24 @@ class AppPrefs extends ChangeNotifier {
   List<String> _searchHistory = const [];
   List<String> get searchHistory => _searchHistory;
 
+  bool? _dirTags;
+
+  /// 目录名当隐式标签（标签页聚合用；没写 front-matter 的仓库也能导航）。
+  bool get dirTags => _dirTags ?? true;
+
+  Future<void> setDirTags(bool v) async {
+    if (_dirTags == v) return;
+    _dirTags = v;
+    notifyListeners();
+    try {
+      final sp =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await sp.setBool(_dirTagsKey, v);
+    } on Object {
+      // 保存失败不影响本次会话
+    }
+  }
+
   /// 记录一次搜索（去重、最新的在最前，最多 12 条）。
   Future<void> addSearchHistory(String query) async {
     final q = query.trim();
@@ -189,6 +208,7 @@ class AppPrefs extends ChangeNotifier {
     var silentPull = false;
     var treeMode = false;
     var searchHistory = const <String>[];
+    var dirTags = true;
     try {
       final sp =
           await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
@@ -227,6 +247,7 @@ class AppPrefs extends ChangeNotifier {
       silentPull = sp.getBool(_silentPullKey) ?? false;
       treeMode = sp.getBool(_treeModeKey) ?? false;
       searchHistory = sp.getStringList(_searchHistoryKey) ?? const <String>[];
+      dirTags = sp.getBool(_dirTagsKey) ?? true;
     } on Object {
       // 保持默认（跟随系统 + GitCode）
     }
@@ -252,6 +273,7 @@ class AppPrefs extends ChangeNotifier {
     prefs._silentPull = silentPull;
     prefs._treeMode = treeMode;
     prefs._searchHistory = searchHistory;
+    prefs._dirTags = dirTags;
     return _instance = prefs;
   }
 

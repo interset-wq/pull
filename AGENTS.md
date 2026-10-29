@@ -73,7 +73,9 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
 - **标签聚合**（`lib/src/notes/tag_index.dart` + `lib/src/ui/tag_page.dart`）：
   首页标签图标进入标签页，聚合所有仓库与本地文件夹镜像的 front-matter
   `tags`（只读每个文件头 8KB，isolate 内扫描），点标签按 AND 跨仓库筛选；
-  多个标签同时选中即要求全部命中。
+  多个标签同时选中即要求全部命中。**目录名隐式标签**（可开关，默认开，
+  标签页右上角切换）：开启后每级目录名并入 tags 合并去重，没写
+  front-matter 的仓库也能用标签导航。
 - **断链检查**（`lib/src/notes/link_check.dart`）：仓库页「更多 → 检查断链」
   批量校验相对链接/图片是否仍存在（跳过外部 URL/锚点/代码块，还原百分号
   编码与 `../`），结果按来源文件分组、可复制清单；纯只读，不修改仓库。

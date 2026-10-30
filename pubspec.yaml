@@ -75,7 +75,7 @@ dev_dependencies:
 flutter_launcher_icons:
   image_path: assets/icon/app_icon.png
   android: true
-  adaptive_icon_background: "#00796B"
+  adaptive_icon_background: "#FBFAF6"
   adaptive_icon_foreground: assets/icon/app_icon_foreground.png
   ios: true
   remove_alpha_ios: true
@@ -109,6 +109,8 @@ flutter:
 
   assets:
     - assets/icons/
+    # 应用内 logo（透明底）；assets/icons/ 一套为不透明桌面图标，不在此列
+    - assets/icon/app_logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -15,6 +15,16 @@
   0%**；过大≈66% 会顶满无留白，过小≈33% 加 16% inset 时只占约 1/9）+ 背景 `@color/brand_paper`；闪屏同纸白底。
   iOS/Windows 未实现（iOS 备选图标 API 需真机验证，Windows 无此概念）；
   通道缺失的平台上 `setAppIcon` 仅持久化偏好、静默忽略。
+- **应用内 logo 与图标源文件**：透明底 logo `assets/icon/app_logo.png` 用于首页头部左上角与
+  设置关于页（深色模式下白底版突兀，应用内一律用透明底；mark 加大后由
+  `temp/icon-design/` 的 SVG 源经 logo-design skill 渲染器无损生成）。
+  `assets/icon/app_icon.png` / `app_icon_foreground.png`（book，1024px）是
+  `flutter_launcher_icons` 的源文件：iOS AppIcon 集与 Windows `icon.ico` 由这两个文件重新生成。
+  **跑该工具前必须先把 pubspec 的 `android: false`、跑完改回**——工具会覆盖手工维护的
+  `mipmap-anydpi-v26/ic_launcher.xml`（inset 0% + fg）与五套 alias 相关的前景资源；
+  五个 alias 的 mipmap/fg 文件不受工具影响（文件名不同）。`assets/icons/` 五个 png
+  是**不透明**桌面图标一套（设置页图标选择器预览 + launcher mipmap 的来源），
+  禁止用透明底版本覆盖（安卓桌面图标不允许透明）。
 - **git 层**：libgit2 FFI（git2dart），仅用克隆/pull 只读能力；这是本项目最大技术风险点，改动同步层前先做小验证。
   - **Android 硬约束**：git2dart 静态链接的 OpenSSL 无法访问系统证书库，`main()` 必须在 `runApp` 前依次执行 `WidgetsFlutterBinding.ensureInitialized()` → `Libgit2.version`（初始化 libgit2）→ `AndroidSSLHelper.initialize()` → `Libgit2.setSSLCertLocations(file:)`，否则 HTTPS 克隆报 "the SSL certificate is invalid"（CA 证书包随 git2dart_binaries 打包，无需自备）。
   - **isolate 硬约束**：git 操作在后台 isolate 执行（大仓库不卡 UI）；isolate 内捕获 git2dart 原生异常后必须转普通 `Exception` 再抛（原生错误对象不可跨 isolate 发送，直接抛出会导致 Future 永不完成、UI 死转）。**clone 与 pull 都用 `Isolate.spawn` + `ReceivePort`**（checkRemote 仍用 `Isolate.run`，不需要进度）；**clone 超时 5 分钟时 `Isolate.kill` 并清理目标目录**——`Isolate.run(...).timeout()` 只会让 Future 超时，isolate 继续写盘留下半成品目录，重试报「本地目录已存在」。clone 支持**进度与取消**：isolate 内 `Callbacks.transferProgress` 把对象数/字节经 port 回传（`[0, received, total, bytes]` 消息），UI 显示百分比与已下载体积；`CloneCancelToken.cancel()` 在下一条进度消息时生效（传输是阻塞原生调用，无法即时打断），取消路径复用 kill + 清理目录的 finally 逻辑。**克隆不传 `checkoutBranch`**：猜错默认分支（如猜 `main` 而远端是 `master`）会触发整仓删除重克隆、大仓库下载两遍；不指定分支时 libgit2 检出远端 HEAD，克隆后再用 `readHeadBranch` 把真实分支写进 meta。

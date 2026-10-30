@@ -393,7 +393,7 @@ class _HomePageState extends State<HomePage> {
         centerTitle: false,
         // 头部左侧用 logo 代替文字品牌（文字受系统字体影响，行为难控）
         title: Image.asset(
-          'assets/icons/icon_book.png',
+          'assets/icon/app_logo.png',
           width: 40,
           height: 40,
         ),

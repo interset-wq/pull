@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/github.dart';
@@ -47,6 +48,10 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
   String _findQuery = '';
   List<TextMatch> _matches = const [];
   int _findIndex = -1;
+
+  // ---- 行选区复制（复用 md raw 模式交互）：长按锚点行，点选扩展区间 ----
+  int? _selAnchor;
+  int? _selFocus;
 
   @override
   void initState() {
@@ -247,6 +252,87 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
     _jumpToLine(_matches[next].line + 1);
   }
 
+  // ---- 行选区复制 ----
+
+  /// 把视口内触摸位置换算成内容行号（0 基）；仅在非换行模式有效。
+  int _lineAt(Offset localPosition, int lineCount) {
+    final dy = localPosition.dy + _verticalController.offset - _topPadding;
+    final line = (dy / _lineHeight).floor();
+    return line.clamp(0, lineCount - 1);
+  }
+
+  void _onSelectionLongPress(LongPressStartDetails d, int lineCount) {
+    if (_wrap) return;
+    final line = _lineAt(d.localPosition, lineCount);
+    setState(() {
+      _selAnchor = line;
+      _selFocus = line;
+    });
+  }
+
+  void _onSelectionTapUp(TapUpDetails d, int lineCount) {
+    if (_wrap || _selAnchor == null) return;
+    setState(() => _selFocus = _lineAt(d.localPosition, lineCount));
+  }
+
+  Future<void> _copySelection(List<String> lines, int start, int end) async {
+    await Clipboard.setData(
+      ClipboardData(text: lines.sublist(start, end + 1).join('\n')),
+    );
+    setState(() {
+      _selAnchor = null;
+      _selFocus = null;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已复制 ${start + 1}–${end + 1} 行')),
+      );
+    }
+  }
+
+  /// 选区操作条（与 md raw 模式同款）。
+  Widget _buildSelectionBar(ThemeData theme, List<String> lines) {
+    final anchor = _selAnchor;
+    final focus = _selFocus;
+    if (anchor == null || focus == null) return const SizedBox.shrink();
+    final selStart = anchor < focus ? anchor : focus;
+    final selEnd = anchor < focus ? focus : anchor;
+    return Material(
+      color: theme.colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '已选 ${selStart + 1}–${selEnd + 1} 行',
+                style: currentCodeFontStyle().copyWith(
+                  fontSize: 13,
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: '复制选中行',
+              icon: const Icon(Icons.copy_all),
+              color: theme.colorScheme.onSecondaryContainer,
+              onPressed: () => _copySelection(lines, selStart, selEnd),
+            ),
+            IconButton(
+              tooltip: '取消选区',
+              icon: const Icon(Icons.close),
+              color: theme.colorScheme.onSecondaryContainer,
+              onPressed: () => setState(() {
+                _selAnchor = null;
+                _selFocus = null;
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFindBar(ThemeData theme) {
     final counter = _matches.isEmpty
         ? (_findQuery.isEmpty ? '' : '无匹配')
@@ -332,6 +418,16 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                 }
                 final content = snapshot.data!;
                 final lines = content.split('\n');
+                final anchor = _selAnchor;
+                final focus = _selFocus;
+                final selStart =
+                    anchor != null && focus != null && !_wrap
+                        ? (anchor < focus ? anchor : focus)
+                        : null;
+                final selEnd =
+                    anchor != null && focus != null && !_wrap
+                        ? (anchor < focus ? focus : anchor)
+                        : null;
                 return Column(
                   children: [
                     // 文件信息栏：语言、行数、快捷复制
@@ -369,6 +465,8 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                         ],
                       ),
                     ),
+                    // 行选区操作条（自动换行模式不支持选区）
+                    if (selStart != null) _buildSelectionBar(theme, lines),
                     Expanded(
                       // 行号列与代码同处一个垂直滚动视图：天然同步滚动，
                       // 不会出现两个 Scrollable 共享 controller 时行号不跟滚的问题
@@ -377,76 +475,111 @@ class _CodeViewerPageState extends State<CodeViewerPage> {
                         thumbVisibility: true,
                         thickness: 4,
                         radius: const Radius.circular(4),
-                        child: SingleChildScrollView(
-                          controller: _verticalController,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onLongPressStart: (d) =>
+                              _onSelectionLongPress(d, lines.length),
+                          onTapUp: (d) => _onSelectionTapUp(d, lines.length),
+                          child: Stack(
                             children: [
-                              if (!_wrap)
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    12,
-                                    _topPadding,
-                                    6,
-                                    _topPadding,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.end,
-                                    children: [
-                                      for (var i = 0; i < lines.length; i++)
-                                        Text(
-                                          '${i + 1}',
-                                          style: currentCodeFontStyle().copyWith(
-                                            fontSize: _fontSize,
-                                            height: _lineHeightFactor,
-                                            color: theme.colorScheme.outline,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              Expanded(
-                                child: _wrap
-                                    ? HighlightView(
-                                        content,
-                                        language: _language,
-                                        theme: isDark
-                                            ? atomOneDarkTheme
-                                            : githubTheme,
+                              SingleChildScrollView(
+                                controller: _verticalController,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (!_wrap)
+                                      Padding(
                                         padding: const EdgeInsets.fromLTRB(
                                           12,
                                           _topPadding,
-                                          16,
+                                          6,
                                           _topPadding,
                                         ),
-                                        textStyle:
-                                            currentCodeFontStyle().copyWith(
-                                          fontSize: _fontSize,
-                                          height: _lineHeightFactor,
-                                        ),
-                                      )
-                                    : HScrollbar(
-                                        child: HighlightView(
-                                          content,
-                                          language: _language,
-                                          theme: isDark
-                                              ? atomOneDarkTheme
-                                              : githubTheme,
-                                          padding: const EdgeInsets.fromLTRB(
-                                            4,
-                                            _topPadding,
-                                            16,
-                                            _topPadding,
-                                          ),
-                                          textStyle:
-                                              currentCodeFontStyle().copyWith(
-                                            fontSize: _fontSize,
-                                            height: _lineHeightFactor,
-                                          ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            for (var i = 0; i < lines.length; i++)
+                                              Text(
+                                                '${i + 1}',
+                                                style: currentCodeFontStyle().copyWith(
+                                                  fontSize: _fontSize,
+                                                  height: _lineHeightFactor,
+                                                  color: theme.colorScheme.outline,
+                                                ),
+                                              ),
+                                          ],
                                         ),
                                       ),
+                                    Expanded(
+                                      child: _wrap
+                                          ? HighlightView(
+                                              content,
+                                              language: _language,
+                                              theme: isDark
+                                                  ? atomOneDarkTheme
+                                                  : githubTheme,
+                                              padding: const EdgeInsets.fromLTRB(
+                                                12,
+                                                _topPadding,
+                                                16,
+                                                _topPadding,
+                                              ),
+                                              textStyle:
+                                                  currentCodeFontStyle().copyWith(
+                                                fontSize: _fontSize,
+                                                height: _lineHeightFactor,
+                                              ),
+                                            )
+                                          : HScrollbar(
+                                              child: HighlightView(
+                                                content,
+                                                language: _language,
+                                                theme: isDark
+                                                    ? atomOneDarkTheme
+                                                    : githubTheme,
+                                                padding: const EdgeInsets.fromLTRB(
+                                                  4,
+                                                  _topPadding,
+                                                  16,
+                                                  _topPadding,
+                                                ),
+                                                textStyle:
+                                                    currentCodeFontStyle().copyWith(
+                                                  fontSize: _fontSize,
+                                                  height: _lineHeightFactor,
+                                                ),
+                                              ),
+                                            ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                              // 选区高亮覆盖层：按固定行高整行绘制，不拦截指针
+                              if (selStart != null)
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        top: _topPadding,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          for (var i = 0; i < selStart; i++)
+                                            SizedBox(height: _lineHeight),
+                                          Container(
+                                            height:
+                                                (selEnd! - selStart + 1) *
+                                                    _lineHeight,
+                                            color: theme
+                                                .colorScheme.primary
+                                                .withValues(alpha: 0.18),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

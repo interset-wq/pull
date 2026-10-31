@@ -19,7 +19,7 @@ Future<void> openNoteFile(
 }) {
   RepoMeta.touchLastOpened(repoRoot, note.relativePath);
   RepoMeta.clearRecentChange(repoRoot, note.relativePath);
-  if (note.isMarkdown || note.isPlainText) {
+  if (note.isMarkdown) {
     return Navigator.push<void>(
       context,
       MaterialPageRoute<void>(

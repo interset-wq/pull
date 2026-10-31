@@ -50,9 +50,8 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   md/ipynb/代码/图片（>32MB 跳过），重名文件夹自动加序号。增量依据镜像根下
   `.pullread_manifest.json` 的源侧 `(size, mtime)` 快照；SAF 授权必须申请
   **写**权限（`pickDirectory(writePermission: true)`），否则编辑器无法写回。
-  `.txt` 同样进镜像，打开时路由到
-  阅读页纯文本模式（`decodeTextBytes`：UTF-8 严格校验优先、GBK 回退，
-  纯 Dart，`lib/src/utils/text_encoding.dart`）。
+  `.txt` 同样进镜像，无特判——与代码文件同路（代码查看器只读查看，
+  编码兜底见 `lib/src/utils/text_encoding.dart`：UTF-8 严格校验优先、GBK 回退，纯 Dart）。
 - **本地 Markdown 编辑器**（`lib/src/ui/markdown_editor.dart`）：本地镜像 md
   的阅读页菜单「编辑」进入——源码 + 预览切换、手动保存 + 未保存离开提醒；
   保存双写镜像（dart:io）+ 原文件夹（Android SAF `writeFileBytes(overwrite:)`
@@ -74,7 +73,7 @@ If-None-Match/If-Modified-Since，304 直接用缓存并刷新 mtime 重置过�
   顺序执行、结果流式分组），支持**搜索历史**（AppPrefs 持久化，最多 12 条，
   历史标签点击即搜、✕ 删除）、**按仓库过滤**（多选仓库标签，未选 = 全部）、
   「正文 / 仅标题」两种模式（仅标题只匹配文件名/路径，不读文件内容，
-  打开命中不带查找词）。正文检索在 isolate 内读 md/ipynb/txt（单文件
+  打开命中不带查找词）。正文检索在 isolate 内读 md/ipynb（单文件
   ≤2MB）做线性匹配：查询按空白（含全角空格）拆词，**全部命中才返回（AND）**，
   摘要用 `SearchSnippet.highlights` 给每个词各自的区间（UI 直接按偏移上色）；
   排序为「路径命中全部关键词 → 命中次数 → 路径」。**刻意不建倒排索引**：中文 2-gram 的 postings

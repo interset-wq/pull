@@ -338,7 +338,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     if (savedFont >= 0 && savedFont < _fontSizes.length) {
       _fontIndex = savedFont;
     }
-    // TXT 可能是 GBK/GB2312 编码，统一走字节解码（UTF-8 优先，GBK 兜底）
+    // 文本可能是 GBK/GB2312 等编码，统一走字节解码（UTF-8 优先，GBK 兜底）
     var raw =
         decodeTextBytes(await File(widget.note.absolutePath).readAsBytes());
     _rawSource = raw;
@@ -351,10 +351,6 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     var body = raw;
     if (widget.note.absolutePath.toLowerCase().endsWith('.ipynb')) {
       body = IpynbConverter.toMarkdown(raw);
-    } else if (widget.note.isPlainText) {
-      // 纯文本（小说/文档）：逐行成段，复用 Markdown 渲染管线；
-      // 行首 # 等保留原样（章节标题恰好生成 TOC，可导航）
-      body = raw.replaceAll(RegExp(r'\r\n|\r'), '\n').split('\n').join('\n\n');
     } else {
       final fm = FrontMatter.parse(raw);
       _title = fm.title;
@@ -1796,7 +1792,7 @@ class _MarkdownViewerPageState extends State<MarkdownViewerPage> {
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => note.isMarkdown || note.isPlainText
+        builder: (_) => note.isMarkdown
             ? MarkdownViewerPage(note: note, repoRoot: widget.repoRoot)
             : CodeViewerPage(path: path, fileName: note.fileName),
       ),

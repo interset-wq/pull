@@ -203,7 +203,6 @@ class _UpdatesPageState extends State<UpdatesPage> {
     if (lower.endsWith('.ipynb')) return Icons.science_outlined;
     if (lower.endsWith('.md') ||
         lower.endsWith('.markdown') ||
-        lower.endsWith('.txt') ||
         lower.endsWith('.mdx')) {
       return Icons.article_outlined;
     }

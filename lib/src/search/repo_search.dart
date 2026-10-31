@@ -19,7 +19,7 @@ class RepoSearchService {
   /// 最多返回多少个命中文件（按命中次数排序）。
   static const maxHitFiles = 60;
 
-  /// 检索 [repoRoot] 下 md / ipynb / txt 的正文。
+  /// 检索 [repoRoot] 下 md / ipynb 的正文。
   ///
   /// [files] 传入已扫描好的列表可复用仓库页缓存；为 null 时在 isolate
   /// 内自行扫描（遵守同一套 ignore 规则）。
@@ -127,8 +127,7 @@ class RepoSearchService {
       note.extension == '.md' ||
       note.extension == '.markdown' ||
       note.extension == '.mdx' ||
-      note.extension == '.ipynb' ||
-      note.extension == '.txt';
+      note.extension == '.ipynb';
 
   /// 0 = 路径里包含全部关键词（排序优先级最高）。
   static int _titleRank(String relativePath, List<String> terms) {

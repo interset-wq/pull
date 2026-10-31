@@ -35,7 +35,8 @@ void main() {
       query: 'FLUTTER',
     );
 
-    expect(results.map((r) => r.relativePath), ['a.md', 'b.md', 'sub/e.txt']);
+    // txt 与代码文件同路（不进正文检索），dart 同理
+    expect(results.map((r) => r.relativePath), ['a.md', 'b.md']);
     expect(results.first.matches, 2);
     expect(results.first.snippets.first.line, 0);
   });
